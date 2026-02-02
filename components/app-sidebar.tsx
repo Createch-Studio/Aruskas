@@ -22,13 +22,13 @@ import { Button } from '@/components/ui/button'
 const navigation = [
   { name: 'Dashboard', href: '/dashboard', icon: LayoutDashboard },
   { name: 'Client', href: '/dashboard/client', icon: Users },
+  { name: 'Produk', href: '/dashboard/produk', icon: Package },
   { name: 'Order', href: '/dashboard/order', icon: ShoppingBag },
   { name: 'Invoice Belanja', href: '/dashboard/invoice', icon: ClipboardList },
-  { name: 'Pengeluaran', href: '/dashboard/pengeluaran', icon: Receipt },
-  { name: 'Produk', href: '/dashboard/produk', icon: Package },
-  { name: 'Inventaris', href: '/dashboard/inventaris', icon: Boxes },
-  { name: 'Aset', href: '/dashboard/aset', icon: Building2 },
   { name: 'Penjualan', href: '/dashboard/penjualan', icon: ShoppingCart },
+  { name: 'Aset', href: '/dashboard/aset', icon: Building2 },
+  { name: 'Inventaris', href: '/dashboard/inventaris', icon: Boxes },
+  { name: 'Pengeluaran', href: '/dashboard/pengeluaran', icon: Receipt },
   { name: 'Laporan', href: '/dashboard/laporan', icon: FileText },
 ]
 
@@ -49,7 +49,7 @@ export function AppSidebar() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
             <Receipt className="h-4 w-4" />
           </div>
-          <span className="text-lg font-semibold text-sidebar-foreground">AkunPro</span>
+          <span className="text-lg font-semibold text-sidebar-foreground">Aruskas</span>
         </Link>
       </div>
       <nav className="flex-1 space-y-1 p-4">
