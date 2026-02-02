@@ -445,16 +445,33 @@ export default function LaporanPage() {
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between">
                     <CardTitle className="flex items-center gap-2">
-                      <Receipt className="h-4 w-4" />
-                      Pengeluaran per Kategori
+                      <Package className="h-4 w-4" />
+                      Produk Populer
                     </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    {data.expensesByCategory.length > 0 ? (
-                      <ReportExpenseChart data={data.expensesByCategory} />
+                    {data.productPerformance.length > 0 ? (
+                      <div className="space-y-4">
+                        {data.productPerformance.slice(0, 5).map((product, index) => (
+                          <div key={product.id} className="flex items-center gap-4">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-sm font-medium">
+                              {index + 1}
+                            </div>
+                            <div className="flex-1 space-y-1">
+                              <p className="text-sm font-medium leading-none">{product.name}</p>
+                              <p className="text-sm text-muted-foreground">
+                                {product.totalSold} terjual • {formatCurrency(product.totalRevenue)}
+                              </p>
+                            </div>
+                            <div className="text-sm font-medium text-green-600">
+                              {formatCurrency(product.totalProfit)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
                     ) : (
                       <div className="flex h-[300px] items-center justify-center text-muted-foreground">
-                        Tidak ada data pengeluaran
+                        Tidak ada data produk
                       </div>
                     )}
                   </CardContent>
