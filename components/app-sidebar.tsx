@@ -12,6 +12,8 @@ import {
   Users,
   ClipboardList,
   ShoppingBag,
+  Boxes,
+  Building2,
   LogOut,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -24,6 +26,8 @@ const navigation = [
   { name: 'Invoice Belanja', href: '/dashboard/invoice', icon: ClipboardList },
   { name: 'Pengeluaran', href: '/dashboard/pengeluaran', icon: Receipt },
   { name: 'Produk', href: '/dashboard/produk', icon: Package },
+  { name: 'Inventaris', href: '/dashboard/inventaris', icon: Boxes },
+  { name: 'Aset', href: '/dashboard/aset', icon: Building2 },
   { name: 'Penjualan', href: '/dashboard/penjualan', icon: ShoppingCart },
   { name: 'Laporan', href: '/dashboard/laporan', icon: FileText },
 ]

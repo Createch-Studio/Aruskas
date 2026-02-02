@@ -26,6 +26,7 @@ type PeriodType = 'daily' | 'monthly' | 'quarterly' | 'yearly' | 'all'
 interface ReportData {
   totalSales: number
   totalCost: number
+  totalInvoiceCost: number
   totalExpenses: number
   totalProfit: number
   profitMargin: number
@@ -37,7 +38,8 @@ interface ReportData {
     name: string
     totalSold: number
     totalRevenue: number
-    hppInvoice: number
+    packagingCost: number
+    invoiceCost: number
     totalProfit: number
   }[]
 }
@@ -172,6 +174,7 @@ export default function LaporanPage() {
         id,
         total_amount,
         total_cost,
+        additional_cost,
         sale_date,
         client_id,
         purchase_invoice_id,
@@ -198,11 +201,20 @@ export default function LaporanPage() {
     const { data: sales } = await salesQuery
 
     const totalSales = sales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0
-    const totalCost = sales?.reduce((sum, s) => sum + Number(s.total_cost), 0) || 0
+    
+    // Calculate total packaging cost from sale_items unit_cost
+    const totalPackagingCost = sales?.reduce((sum, s) => {
+      const items = s.sale_items as { quantity: number; unit_cost: number }[]
+      return sum + (items?.reduce((itemSum, item) => itemSum + (item.quantity * Number(item.unit_cost)), 0) || 0)
+    }, 0) || 0
+    
+    // Calculate total invoice cost from additional_cost
+    const totalInvoiceCost = sales?.reduce((sum, s) => sum + Number(s.additional_cost || 0), 0) || 0
+    
     const transactionCount = sales?.length || 0
 
-    // Calculate profit
-    const totalProfit = totalSales - totalCost - totalExpenses
+    // Calculate profit: Revenue - Packaging Cost - Invoice Cost - Expenses
+    const totalProfit = totalSales - totalPackagingCost - totalInvoiceCost - totalExpenses
     const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
 
     // Group sales by period for chart
@@ -224,8 +236,13 @@ export default function LaporanPage() {
       if (!salesByPeriodMap[periodKey]) {
         salesByPeriodMap[periodKey] = { sales: 0, profit: 0 }
       }
+      
+      // Calculate packaging cost for this sale
+      const salePackagingCost = (s.sale_items as { quantity: number; unit_cost: number }[])
+        ?.reduce((sum, item) => sum + (item.quantity * Number(item.unit_cost)), 0) || 0
+      
       salesByPeriodMap[periodKey].sales += Number(s.total_amount)
-      salesByPeriodMap[periodKey].profit += Number(s.total_amount) - Number(s.total_cost)
+      salesByPeriodMap[periodKey].profit += Number(s.total_amount) - salePackagingCost - Number(s.additional_cost || 0)
     })
 
     const salesByPeriod = Object.entries(salesByPeriodMap).map(([periodKey, values]) => ({
@@ -234,8 +251,8 @@ export default function LaporanPage() {
       profit: values.profit,
     }))
 
-    // Calculate product performance with HPP Invoice
-    const productStats: Record<string, { name: string; totalSold: number; totalRevenue: number; hppInvoice: number; totalProfit: number }> = {}
+    // Calculate product performance with Packaging Cost and Invoice Cost
+    const productStats: Record<string, { name: string; totalSold: number; totalRevenue: number; packagingCost: number; invoiceCost: number; totalProfit: number }> = {}
     sales?.forEach((s) => {
       const items = s.sale_items as {
         quantity: number
@@ -245,8 +262,8 @@ export default function LaporanPage() {
         products: { id: string; name: string } | null
       }[]
       
-      // Get purchase invoice cost for this sale
-      const invoiceCost = (s.purchase_invoices as { id: string; total_amount: number } | null)?.total_amount || 0
+      // Get additional costs for this sale
+      const saleInvoiceCost = Number(s.additional_cost || 0)
       const totalItemsInSale = items?.reduce((sum, item) => sum + item.quantity, 0) || 1
       
       items?.forEach((item) => {
@@ -254,18 +271,22 @@ export default function LaporanPage() {
         const productName = item.products?.name || 'Unknown'
         
         if (!productStats[productId]) {
-          productStats[productId] = { name: productName, totalSold: 0, totalRevenue: 0, hppInvoice: 0, totalProfit: 0 }
+          productStats[productId] = { name: productName, totalSold: 0, totalRevenue: 0, packagingCost: 0, invoiceCost: 0, totalProfit: 0 }
         }
         
+        // Packaging cost from unit_cost (cost per item set in sales)
+        const itemPackagingCost = item.quantity * Number(item.unit_cost)
+        
         // Distribute invoice cost proportionally based on quantity
-        const itemInvoiceCostShare = (item.quantity / totalItemsInSale) * Number(invoiceCost)
+        const itemInvoiceCostShare = (item.quantity / totalItemsInSale) * saleInvoiceCost
         
         const itemRevenue = item.quantity * Number(item.unit_price)
-        const itemProfit = itemRevenue - itemInvoiceCostShare
+        const itemProfit = itemRevenue - itemPackagingCost - itemInvoiceCostShare
         
         productStats[productId].totalSold += item.quantity
         productStats[productId].totalRevenue += itemRevenue
-        productStats[productId].hppInvoice += itemInvoiceCostShare
+        productStats[productId].packagingCost += itemPackagingCost
+        productStats[productId].invoiceCost += itemInvoiceCostShare
         productStats[productId].totalProfit += itemProfit
       })
     })
@@ -274,9 +295,12 @@ export default function LaporanPage() {
       .map(([id, stats]) => ({ id, ...stats }))
       .sort((a, b) => b.totalProfit - a.totalProfit)
 
+    const totalCost = sales?.reduce((sum, s) => sum + Number(s.total_cost), 0) || 0
+
     setData({
       totalSales,
-      totalCost,
+      totalCost: totalPackagingCost,
+      totalInvoiceCost,
       totalExpenses,
       totalProfit,
       profitMargin,
@@ -379,7 +403,7 @@ export default function LaporanPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{formatCurrency(data.totalExpenses)}</div>
-                    <p className="text-xs text-muted-foreground">HPP: {formatCurrency(data.totalCost)}</p>
+                    <p className="text-xs text-muted-foreground">HPP: {formatCurrency(data.totalCost + data.totalInvoiceCost)}</p>
                   </CardContent>
                 </Card>
 

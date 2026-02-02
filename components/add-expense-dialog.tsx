@@ -37,11 +37,16 @@ export function AddExpenseDialog({ categories, clients, onSuccess }: AddExpenseD
   const [open, setOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [categoryId, setCategoryId] = useState('')
-  const [clientId, setClientId] = useState('')
+  const [clientId, setClientId] = useState('none')
+  const [clientSearch, setClientSearch] = useState('')
   const [description, setDescription] = useState('')
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(new Date().toISOString().split('T')[0])
   const router = useRouter()
+
+  const filteredClients = clients.filter(client =>
+    client.name.toLowerCase().includes(clientSearch.toLowerCase())
+  )
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,7 +63,7 @@ export function AddExpenseDialog({ categories, clients, onSuccess }: AddExpenseD
     const { error } = await supabase.from('expenses').insert({
       user_id: user.id,
       category_id: categoryId,
-      client_id: clientId || null,
+      client_id: clientId === 'none' ? null : clientId,
       description,
       amount: parseFloat(amount),
       date,
@@ -69,7 +74,8 @@ export function AddExpenseDialog({ categories, clients, onSuccess }: AddExpenseD
     if (!error) {
       setOpen(false)
       setCategoryId('')
-      setClientId('')
+      setClientId('none')
+      setClientSearch('')
       setDescription('')
       setAmount('')
       setDate(new Date().toISOString().split('T')[0])
@@ -112,18 +118,32 @@ export function AddExpenseDialog({ categories, clients, onSuccess }: AddExpenseD
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label>Client (opsional)</Label>
+                <Label htmlFor="client-select">Client (opsional)</Label>
                 <Select value={clientId} onValueChange={setClientId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih client" />
+                  <SelectTrigger id="client-select">
+                    <SelectValue placeholder="Tanpa Client" />
                   </SelectTrigger>
                   <SelectContent>
+                    <div className="px-2 pb-2">
+                      <Input
+                        placeholder="Cari client..."
+                        value={clientSearch}
+                        onChange={(e) => setClientSearch(e.target.value)}
+                        className="h-8"
+                      />
+                    </div>
                     <SelectItem value="none">Tanpa Client</SelectItem>
-                    {clients.map((client) => (
-                      <SelectItem key={client.id} value={client.id}>
-                        {client.name}
-                      </SelectItem>
-                    ))}
+                    {filteredClients.length > 0 ? (
+                      filteredClients.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                        Tidak ada client ditemukan
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

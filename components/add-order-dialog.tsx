@@ -45,6 +45,7 @@ export function AddOrderDialog({ clients, products, onSuccess }: AddOrderDialogP
   const [open, setOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [clientId, setClientId] = useState<string>('none')
+  const [clientSearch, setClientSearch] = useState('')
   const [orderNumber, setOrderNumber] = useState('')
   const [orderDate, setOrderDate] = useState(new Date().toISOString().split('T')[0])
   const [dueDate, setDueDate] = useState('')
@@ -83,31 +84,30 @@ export function AddOrderDialog({ clients, products, onSuccess }: AddOrderDialogP
     return items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0)
   }
 
+  const filteredClients = clients.filter(client =>
+    client.name.toLowerCase().includes(clientSearch.toLowerCase())
+  )
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-
-    console.log('[v0] Starting order submission')
 
     try {
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) {
-        console.log('[v0] No user found')
         setIsLoading(false)
         return
       }
 
       const validItems = items.filter(item => item.description && item.quantity > 0)
       if (validItems.length === 0) {
-        console.log('[v0] No valid items')
         alert('Tambahkan minimal 1 item dengan deskripsi dan qty')
         setIsLoading(false)
         return
       }
 
       const totalAmount = calculateTotal()
-      console.log('[v0] Total amount:', totalAmount)
 
       // Create order
       const { data: order, error: orderError } = await supabase
@@ -126,20 +126,16 @@ export function AddOrderDialog({ clients, products, onSuccess }: AddOrderDialogP
         .single()
 
       if (orderError) {
-        console.error('[v0] Order error:', orderError)
         alert(`Error: ${orderError.message}`)
         setIsLoading(false)
         return
       }
 
       if (!order) {
-        console.error('[v0] No order returned')
         alert('Error: Gagal membuat order')
         setIsLoading(false)
         return
       }
-
-      console.log('[v0] Order created:', order.id)
 
       // Create order items
       const orderItems = validItems.map(item => ({
@@ -153,13 +149,10 @@ export function AddOrderDialog({ clients, products, onSuccess }: AddOrderDialogP
       const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
       
       if (itemsError) {
-        console.error('[v0] Items error:', itemsError)
         alert(`Error items: ${itemsError.message}`)
         setIsLoading(false)
         return
       }
-
-      console.log('[v0] Order items created')
 
       setOpen(false)
       setClientId('none')
@@ -171,7 +164,6 @@ export function AddOrderDialog({ clients, products, onSuccess }: AddOrderDialogP
       onSuccess()
       router.refresh()
     } catch (error) {
-      console.error('[v0] Unexpected error:', error)
       alert('Terjadi error yang tidak terduga')
     } finally {
       setIsLoading(false)
@@ -208,18 +200,32 @@ export function AddOrderDialog({ clients, products, onSuccess }: AddOrderDialogP
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Client</Label>
+                <Label htmlFor="client-select">Client (opsional)</Label>
                 <Select value={clientId} onValueChange={setClientId}>
-                  <SelectTrigger>
+                  <SelectTrigger id="client-select">
                     <SelectValue placeholder="Pilih client" />
                   </SelectTrigger>
                   <SelectContent>
+                    <div className="px-2 pb-2">
+                      <Input
+                        placeholder="Cari client..."
+                        value={clientSearch}
+                        onChange={(e) => setClientSearch(e.target.value)}
+                        className="h-8"
+                      />
+                    </div>
                     <SelectItem value="none">Tanpa Client</SelectItem>
-                    {clients.map((client) => (
-                      <SelectItem key={client.id} value={client.id}>
-                        {client.name}
-                      </SelectItem>
-                    ))}
+                    {filteredClients.length > 0 ? (
+                      filteredClients.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                        Tidak ada client ditemukan
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

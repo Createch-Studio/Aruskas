@@ -88,7 +88,13 @@ export default function OrderPage() {
         .order('name'),
     ])
 
-    setOrders((ordersRes.data || []) as Order[])
+    // Map order_items to items for consistency
+    const mappedOrders = (ordersRes.data || []).map(order => ({
+      ...order,
+      items: order.order_items || []
+    }))
+
+    setOrders(mappedOrders as Order[])
     setClients((clientsRes.data || []) as Client[])
     setProducts((productsRes.data || []) as Product[])
     setLoading(false)

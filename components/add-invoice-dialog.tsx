@@ -51,6 +51,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
   const [open, setOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [clientId, setClientId] = useState('')
+  const [clientSearch, setClientSearch] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [description, setDescription] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0])
@@ -58,6 +59,10 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
     { description: '', quantity: 1, unitPrice: 0 }
   ])
   const router = useRouter()
+
+  const filteredClients = clients.filter(client =>
+    client.name.toLowerCase().includes(clientSearch.toLowerCase())
+  )
 
   const addItem = () => {
     setItems([...items, { description: '', quantity: 1, unitPrice: 0 }])
@@ -131,6 +136,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
     setIsLoading(false)
     setOpen(false)
     setClientId('')
+    setClientSearch('')
     setInvoiceNumber('')
     setDescription('')
     setInvoiceDate(new Date().toISOString().split('T')[0])
@@ -160,15 +166,29 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
               <div className="grid gap-2">
                 <Label htmlFor="client">Client</Label>
                 <Select value={clientId} onValueChange={setClientId} required>
-                  <SelectTrigger>
+                  <SelectTrigger id="client">
                     <SelectValue placeholder="Pilih client" />
                   </SelectTrigger>
                   <SelectContent>
-                    {clients.map((client) => (
-                      <SelectItem key={client.id} value={client.id}>
-                        {client.name}
-                      </SelectItem>
-                    ))}
+                    <div className="px-2 pb-2">
+                      <Input
+                        placeholder="Cari client..."
+                        value={clientSearch}
+                        onChange={(e) => setClientSearch(e.target.value)}
+                        className="h-8"
+                      />
+                    </div>
+                    {filteredClients.length > 0 ? (
+                      filteredClients.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <div className="px-2 py-6 text-center text-sm text-muted-foreground">
+                        Tidak ada client ditemukan
+                      </div>
+                    )}
                   </SelectContent>
                 </Select>
               </div>

@@ -133,3 +133,111 @@ export interface OrderItem {
   created_at: string
   product?: Product
 }
+
+export interface InventoryItem {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  unit: string
+  quantity: number
+  min_quantity: number
+  unit_cost: number
+  created_at: string
+  transactions?: InventoryTransaction[]
+}
+
+export interface InventoryTransaction {
+  id: string
+  inventory_id: string
+  type: 'in' | 'out' | 'adjustment'
+  quantity: number
+  notes: string | null
+  transaction_date: string
+  created_at: string
+  inventory?: InventoryItem
+}
+
+export interface Asset {
+  id: string
+  user_id: string
+  name: string
+  description: string | null
+  category: string
+  purchase_date: string | null
+  purchase_price: number
+  current_value: number
+  condition: 'excellent' | 'good' | 'fair' | 'poor'
+  status: 'active' | 'inactive' | 'sold' | 'disposed'
+  location: string | null
+  notes: string | null
+  created_at: string
+}
+
+export interface Cash {
+  id: string
+  user_id: string
+  name: string
+  account_type: 'cash' | 'bank' | 'e-wallet'
+  amount: number
+  description: string | null
+  created_at: string
+  transactions?: CashTransaction[]
+}
+
+export interface CashTransaction {
+  id: string
+  cash_id: string
+  type: 'in' | 'out'
+  amount: number
+  category: string
+  description: string | null
+  transaction_date: string
+  created_at: string
+}
+
+export interface Debt {
+  id: string
+  user_id: string
+  client_id: string | null
+  name: string
+  description: string | null
+  amount: number
+  remaining_amount: number
+  due_date: string | null
+  status: 'active' | 'paid' | 'overdue'
+  created_at: string
+  payments?: DebtPayment[]
+}
+
+export interface DebtPayment {
+  id: string
+  debt_id: string
+  amount: number
+  payment_date: string
+  notes: string | null
+  created_at: string
+}
+
+export interface Receivable {
+  id: string
+  user_id: string
+  client_id: string | null
+  name: string
+  description: string | null
+  amount: number
+  remaining_amount: number
+  due_date: string | null
+  status: 'active' | 'paid' | 'overdue'
+  created_at: string
+  payments?: ReceivablePayment[]
+}
+
+export interface ReceivablePayment {
+  id: string
+  receivable_id: string
+  amount: number
+  payment_date: string
+  notes: string | null
+  created_at: string
+}

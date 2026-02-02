@@ -9,7 +9,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Calendar } from 'lucide-react'
 import { SaleTable } from '@/components/sale-table'
 import { AddSaleDialog } from '@/components/add-sale-dialog'
-import type { Sale, Product, Client, SaleItem, PurchaseInvoice } from '@/lib/types'
+import type { Sale, Product, Client, SaleItem, PurchaseInvoice, Order, OrderItem } from '@/lib/types'
 
 type PeriodType = 'daily' | 'monthly' | 'yearly' | 'all'
 
@@ -52,6 +52,7 @@ export default function PenjualanPage() {
   const [products, setProducts] = useState<Product[]>([])
   const [clients, setClients] = useState<Client[]>([])
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>([])
+  const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
 
   // Period filter states
@@ -69,7 +70,7 @@ export default function PenjualanPage() {
 
     const { start, end } = getDateRange(period, selectedDate, selectedMonth, selectedYear)
 
-    const [salesRes, productsRes, clientsRes, invoicesRes] = await Promise.all([
+    const [salesRes, productsRes, clientsRes, invoicesRes, ordersRes] = await Promise.all([
       supabase
         .from('sales')
         .select('*, clients(*), sale_items(*, products(*))')
@@ -94,6 +95,12 @@ export default function PenjualanPage() {
         .eq('user_id', user.id)
         .in('status', ['pending', 'used'])
         .order('invoice_date', { ascending: false }),
+      supabase
+        .from('orders')
+        .select('*, clients(*), order_items(*, products(*))')
+        .eq('user_id', user.id)
+        .in('status', ['pending', 'in_progress'])
+        .order('order_date', { ascending: false }),
     ])
 
     const mappedSales = (salesRes.data || []).map((sale) => ({
@@ -110,10 +117,20 @@ export default function PenjualanPage() {
       client: inv.clients,
     })) as PurchaseInvoice[]
 
+    const mappedOrders = (ordersRes.data || []).map((order) => ({
+      ...order,
+      client: order.clients,
+      items: (order.order_items || []).map((item: OrderItem & { products: Product }) => ({
+        ...item,
+        product: item.products,
+      })),
+    })) as Order[]
+
     setSales(mappedSales)
     setProducts((productsRes.data || []) as Product[])
     setClients((clientsRes.data || []) as Client[])
     setInvoices(mappedInvoices)
+    setOrders(mappedOrders)
     setLoading(false)
   }, [period, selectedDate, selectedMonth, selectedYear])
 
@@ -137,6 +154,7 @@ export default function PenjualanPage() {
           products={products} 
           clients={clients} 
           invoices={invoices}
+          orders={orders}
           onSuccess={fetchData} 
         />
       </div>

@@ -26,12 +26,13 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Plus, Trash2 } from 'lucide-react'
-import type { Product, Client, PurchaseInvoice } from '@/lib/types'
+import type { Product, Client, PurchaseInvoice, Order } from '@/lib/types'
 
 interface AddSaleDialogProps {
   products: Product[]
   clients: Client[]
   invoices: PurchaseInvoice[]
+  orders: Order[]
   onSuccess: () => void
 }
 
@@ -50,7 +51,7 @@ function formatCurrency(amount: number) {
   }).format(amount)
 }
 
-export function AddSaleDialog({ products, clients, invoices, onSuccess }: AddSaleDialogProps) {
+export function AddSaleDialog({ products, clients, invoices, orders, onSuccess }: AddSaleDialogProps) {
   const [open, setOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [items, setItems] = useState<SaleItemInput[]>([{ productId: '', quantity: 1, customPrice: null, customCost: null }])
@@ -58,7 +59,49 @@ export function AddSaleDialog({ products, clients, invoices, onSuccess }: AddSal
   const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0])
   const [clientId, setClientId] = useState<string>('none')
   const [invoiceId, setInvoiceId] = useState<string>('none')
+  const [orderId, setOrderId] = useState<string>('none')
   const router = useRouter()
+
+  // Get available orders (pending or in_progress)
+  const availableOrders = orders.filter(
+    order => (order.status === 'pending' || order.status === 'in_progress') && 
+             (clientId === 'none' || order.client_id === clientId)
+  )
+
+  // Handle order selection - populate items from order
+  const handleOrderSelect = (selectedOrderId: string) => {
+    setOrderId(selectedOrderId)
+    
+    if (selectedOrderId === 'none') return
+    
+    const selectedOrder = orders.find(o => o.id === selectedOrderId)
+    if (!selectedOrder || !selectedOrder.items) return
+    
+    // Set client from order
+    if (selectedOrder.client_id) {
+      setClientId(selectedOrder.client_id)
+    }
+    
+    // Set notes from order
+    if (selectedOrder.notes) {
+      setNotes(selectedOrder.notes)
+    }
+    
+    // Convert order items to sale items
+    const saleItems: SaleItemInput[] = selectedOrder.items.map(item => {
+      const product = products.find(p => p.id === item.product_id)
+      return {
+        productId: item.product_id || '',
+        quantity: item.quantity,
+        customPrice: item.unit_price,
+        customCost: product?.cost || null,
+      }
+    }).filter(item => item.productId)
+    
+    if (saleItems.length > 0) {
+      setItems(saleItems)
+    }
+  }
 
   // Get available invoices for selected client (pending status only)
   const availableInvoices = invoices.filter(
@@ -183,12 +226,21 @@ export function AddSaleDialog({ products, clients, invoices, onSuccess }: AddSal
         .eq('id', invoiceId)
     }
 
+    // Update order status to completed if order was selected
+    if (orderId !== 'none') {
+      await supabase
+        .from('orders')
+        .update({ status: 'completed' })
+        .eq('id', orderId)
+    }
+
     setIsLoading(false)
     setOpen(false)
     setItems([{ productId: '', quantity: 1, customPrice: null, customCost: null }])
     setNotes('')
     setClientId('none')
     setInvoiceId('none')
+    setOrderId('none')
     setSaleDate(new Date().toISOString().split('T')[0])
     onSuccess()
     router.refresh()
@@ -214,6 +266,28 @@ export function AddSaleDialog({ products, clients, invoices, onSuccess }: AddSal
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
+            {availableOrders.length > 0 && (
+              <div className="grid gap-2">
+                <Label>Ambil dari Order (opsional)</Label>
+                <Select value={orderId} onValueChange={handleOrderSelect}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Pilih order untuk diambil" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Tanpa Order</SelectItem>
+                    {availableOrders.map((order) => (
+                      <SelectItem key={order.id} value={order.id}>
+                        {order.order_number} - {order.client?.name || 'Tanpa Client'} ({formatCurrency(order.total_amount)})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Pilih order untuk mengisi item penjualan secara otomatis
+                </p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="sale-date">Tanggal</Label>
@@ -229,7 +303,8 @@ export function AddSaleDialog({ products, clients, invoices, onSuccess }: AddSal
                 <Label>Client (opsional)</Label>
                 <Select value={clientId} onValueChange={(val) => {
                   setClientId(val)
-                  setInvoiceId('none') // Reset invoice when client changes
+                  setInvoiceId('none')
+                  setOrderId('none')
                 }}>
                   <SelectTrigger>
                     <SelectValue placeholder="Pilih client" />

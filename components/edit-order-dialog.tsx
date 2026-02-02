@@ -58,7 +58,15 @@ export function EditOrderDialog({ order, clients, products, open, onOpenChange, 
   const [dueDate, setDueDate] = useState('') // Declare setDueDate variable
 
   useEffect(() => {
-    if (order) {
+    const fetchOrderItems = async () => {
+      if (!order) return
+      
+      const supabase = createClient()
+      const { data: orderItems } = await supabase
+        .from('order_items')
+        .select('*')
+        .eq('order_id', order.id)
+
       setClientId(order.client_id || 'none')
       setOrderNumber(order.order_number)
       setOrderDate(order.order_date?.split('T')[0] || '')
@@ -66,8 +74,8 @@ export function EditOrderDialog({ order, clients, products, open, onOpenChange, 
       setStatus(order.status)
       setNotes(order.notes || '')
       
-      if (order.items && order.items.length > 0) {
-        setItems(order.items.map((item) => ({
+      if (orderItems && orderItems.length > 0) {
+        setItems(orderItems.map((item) => ({
           id: item.id,
           productId: item.product_id || 'none',
           description: item.description,
@@ -78,6 +86,8 @@ export function EditOrderDialog({ order, clients, products, open, onOpenChange, 
         setItems([{ productId: 'none', description: '', quantity: 1, unitPrice: 0 }])
       }
     }
+
+    fetchOrderItems()
   }, [order])
 
   const addItem = () => {

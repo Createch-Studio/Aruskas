@@ -15,7 +15,8 @@ interface ReportProductTableProps {
     name: string
     totalSold: number
     totalRevenue: number
-    hppInvoice: number
+    packagingCost: number
+    invoiceCost: number
     totalProfit: number
   }[]
 }
@@ -34,7 +35,8 @@ function cn(...classes: (string | boolean | undefined)[]) {
 
 export function ReportProductTable({ data }: ReportProductTableProps) {
   const totalRevenue = data.reduce((sum, item) => sum + item.totalRevenue, 0)
-  const totalHppInvoice = data.reduce((sum, item) => sum + item.hppInvoice, 0)
+  const totalPackagingCost = data.reduce((sum, item) => sum + item.packagingCost, 0)
+  const totalInvoiceCost = data.reduce((sum, item) => sum + item.invoiceCost, 0)
   const totalProfit = data.reduce((sum, item) => sum + item.totalProfit, 0)
   const totalSold = data.reduce((sum, item) => sum + item.totalSold, 0)
 
@@ -47,7 +49,8 @@ export function ReportProductTable({ data }: ReportProductTableProps) {
             <TableHead>Produk</TableHead>
             <TableHead className="text-right">Qty Terjual</TableHead>
             <TableHead className="text-right">Pendapatan</TableHead>
-            <TableHead className="text-right">HPP Invoice</TableHead>
+            <TableHead className="text-right">Packaging Cost</TableHead>
+            <TableHead className="text-right">Biaya Invoice Belanja</TableHead>
             <TableHead className="text-right">Profit Bersih</TableHead>
             <TableHead className="text-right">Profit Margin</TableHead>
           </TableRow>
@@ -64,7 +67,10 @@ export function ReportProductTable({ data }: ReportProductTableProps) {
                 <TableCell className="text-right">{product.totalSold}</TableCell>
                 <TableCell className="text-right">{formatCurrency(product.totalRevenue)}</TableCell>
                 <TableCell className="text-right text-muted-foreground">
-                  {formatCurrency(product.hppInvoice)}
+                  {formatCurrency(product.packagingCost)}
+                </TableCell>
+                <TableCell className="text-right text-muted-foreground">
+                  {formatCurrency(product.invoiceCost)}
                 </TableCell>
                 <TableCell className={cn(
                   "text-right font-medium",
@@ -87,7 +93,10 @@ export function ReportProductTable({ data }: ReportProductTableProps) {
               <TableCell className="text-right">{totalSold}</TableCell>
               <TableCell className="text-right">{formatCurrency(totalRevenue)}</TableCell>
               <TableCell className="text-right text-muted-foreground">
-                {formatCurrency(totalHppInvoice)}
+                {formatCurrency(totalPackagingCost)}
+              </TableCell>
+              <TableCell className="text-right text-muted-foreground">
+                {formatCurrency(totalInvoiceCost)}
               </TableCell>
               <TableCell className={cn(
                 "text-right",
