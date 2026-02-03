@@ -2,11 +2,11 @@
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Plus } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import type { Debt } from '@/lib/types'
 import { formatCurrency, cn } from '@/lib/utils'
 import { AddDebtDialog } from '@/components/add-debt-dialog'
+import { DebtStatusDropdown } from '@/components/debt-status-dropdown'
 import { useState } from 'react'
 
 interface DebtTableProps {
@@ -16,19 +16,24 @@ interface DebtTableProps {
 
 export function DebtTable({ debts, onRefresh }: DebtTableProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [search, setSearch] = useState('')
 
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' }> = {
-      pending: { label: 'Belum Dibayar', variant: 'destructive' },
-      partial: { label: 'Dibayar Sebagian', variant: 'secondary' },
-      paid: { label: 'Lunas', variant: 'default' },
-    }
-    return variants[status] || { label: status, variant: 'default' }
-  }
+  const filteredDebts = debts.filter(d => 
+    d.name.toLowerCase().includes(search.toLowerCase())
+  )
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-col sm:flex-row justify-between gap-4">
+        <div className="relative w-full sm:w-64">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Cari kreditur..."
+            className="w-full pl-9 pr-4 py-2 border rounded-md text-sm outline-none focus:ring-1 focus:ring-primary"
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         <Button onClick={() => setAddDialogOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Tambah Utang
@@ -37,56 +42,64 @@ export function DebtTable({ debts, onRefresh }: DebtTableProps) {
 
       <AddDebtDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onSuccess={onRefresh} />
 
-      {debts.length === 0 ? (
-        <div className="text-center py-8 text-muted-foreground">
-          Tidak ada utang
-        </div>
-      ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
+      <div className="rounded-md border bg-white shadow-sm overflow-hidden">
+        <Table>
+          <TableHeader className="bg-slate-50">
+            <TableRow>
+              <TableHead>Kreditur</TableHead>
+              <TableHead className="text-right">Total Utang</TableHead>
+              <TableHead className="text-right">Terbayar</TableHead>
+              <TableHead className="text-right">Sisa</TableHead>
+              <TableHead>Jatuh Tempo</TableHead>
+              <TableHead className="text-center w-[100px]">Aksi</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredDebts.length === 0 ? (
               <TableRow>
-                <TableHead>Kreditur</TableHead>
-                <TableHead className="text-right">Total Utang</TableHead>
-                <TableHead className="text-right">Terbayar</TableHead>
-                <TableHead className="text-right">Sisa</TableHead>
-                <TableHead>Jatuh Tempo</TableHead>
-                <TableHead>Status</TableHead>
+                <TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic">
+                  Tidak ada data utang ditemukan.
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {debts.map((debt) => {
-                const badge = getStatusBadge(debt.status)
+            ) : (
+              filteredDebts.map((debt) => {
+                if (!debt.id) return null
+
                 const isOverdue = debt.due_date && new Date(debt.due_date) < new Date() && debt.status !== 'paid'
+                const paidAmount = debt.amount - debt.remaining_amount
                 
                 return (
-                  <TableRow key={debt.id}>
+                  <TableRow key={debt.id} className="hover:bg-slate-50/50 transition-colors">
                     <TableCell>
-                      <div className="font-medium">{debt.name}</div>
+                      <div className="font-semibold text-slate-900">{debt.name}</div>
                       {debt.description && (
-                        <div className="text-sm text-muted-foreground">{debt.description}</div>
+                        <div className="text-[11px] text-muted-foreground italic line-clamp-1">
+                          {debt.description}
+                        </div>
                       )}
                     </TableCell>
-                    <TableCell className="text-right">{formatCurrency(debt.amount)}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">
-                      {formatCurrency(debt.amount - debt.remaining_amount)}
+                    <TableCell className="text-right font-mono text-sm">
+                      {formatCurrency(debt.amount)}
                     </TableCell>
-                    <TableCell className="text-right font-medium text-destructive">
+                    <TableCell className="text-right text-muted-foreground font-mono text-sm">
+                      {formatCurrency(paidAmount)}
+                    </TableCell>
+                    <TableCell className="text-right font-bold text-red-600 font-mono text-sm">
                       {formatCurrency(debt.remaining_amount)}
                     </TableCell>
-                    <TableCell className={cn(isOverdue && 'text-destructive font-medium')}>
+                    <TableCell className={cn("text-xs", isOverdue && 'text-red-500 font-bold')}>
                       {debt.due_date ? new Date(debt.due_date).toLocaleDateString('id-ID') : '-'}
                     </TableCell>
-                    <TableCell>
-                      <Badge variant={badge.variant}>{badge.label}</Badge>
+                    <TableCell className="text-center">
+                      <DebtStatusDropdown debt={debt} onRefresh={onRefresh} />
                     </TableCell>
                   </TableRow>
                 )
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 }

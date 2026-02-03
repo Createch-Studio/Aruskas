@@ -2,11 +2,11 @@
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { Plus } from 'lucide-react'
+import { Plus, Search } from 'lucide-react'
 import type { Receivable } from '@/lib/types'
 import { formatCurrency, cn } from '@/lib/utils'
 import { AddReceivableDialog } from '@/components/add-receivable-dialog'
+import { ReceivableStatusDropdown } from '@/components/receivable-status-dropdown'
 import { useState } from 'react'
 
 interface ReceivableTableProps {
@@ -16,77 +16,97 @@ interface ReceivableTableProps {
 
 export function ReceivableTable({ receivables, onRefresh }: ReceivableTableProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
+  const [search, setSearch] = useState('')
 
-  const getStatusBadge = (status: string) => {
-    const variants: Record<string, { label: string; variant: 'default' | 'secondary' | 'destructive' }> = {
-      pending: { label: 'Belum Diterima', variant: 'destructive' },
-      partial: { label: 'Diterima Sebagian', variant: 'secondary' },
-      received: { label: 'Lunas', variant: 'default' },
-    }
-    return variants[status] || { label: status, variant: 'default' }
-  }
+  // Filter data berdasarkan nama debitur
+  const filteredData = receivables.filter((item) =>
+    item.name.toLowerCase().includes(search.toLowerCase())
+  )
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
+      <div className="flex flex-col sm:flex-row justify-between gap-4">
+        <div className="relative w-full sm:w-72">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Cari nama debitur..."
+            className="w-full pl-9 pr-4 py-2 border rounded-md text-sm focus:ring-1 focus:ring-primary outline-none"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
         <Button onClick={() => setAddDialogOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Tambah Piutang
         </Button>
       </div>
 
-      <AddReceivableDialog open={addDialogOpen} onOpenChange={setAddDialogOpen} onSuccess={onRefresh} />
+      <AddReceivableDialog 
+        open={addDialogOpen} 
+        onOpenChange={setAddDialogOpen} 
+        onSuccess={onRefresh} 
+      />
 
-      {receivables.length === 0 ? (
-        <div className="text-center py-8 text-muted-foreground">
-          Tidak ada piutang
-        </div>
-      ) : (
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
+      <div className="rounded-md border bg-white shadow-sm overflow-hidden">
+        <Table>
+          <TableHeader className="bg-slate-50">
+            <TableRow>
+              <TableHead>Debitur</TableHead>
+              <TableHead className="text-right">Total Piutang</TableHead>
+              <TableHead className="text-right">Diterima</TableHead>
+              <TableHead className="text-right">Sisa</TableHead>
+              <TableHead>Jatuh Tempo</TableHead>
+              <TableHead className="w-[80px] text-center">Status</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {filteredData.length === 0 ? (
               <TableRow>
-                <TableHead>Debitur</TableHead>
-                <TableHead className="text-right">Total Piutang</TableHead>
-                <TableHead className="text-right">Diterima</TableHead>
-                <TableHead className="text-right">Sisa</TableHead>
-                <TableHead>Jatuh Tempo</TableHead>
-                <TableHead>Status</TableHead>
+                <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
+                  Data piutang tidak ditemukan.
+                </TableCell>
               </TableRow>
-            </TableHeader>
-            <TableBody>
-              {receivables.map((receivable) => {
-                const badge = getStatusBadge(receivable.status)
-                const isOverdue = receivable.due_date && new Date(receivable.due_date) < new Date() && receivable.status !== 'received'
-                
+            ) : (
+              filteredData.map((receivable) => {
+                if (!receivable.id) return null;
+
+                const isOverdue = 
+                  receivable.due_date && 
+                  new Date(receivable.due_date) < new Date() && 
+                  receivable.status !== 'paid'
+
                 return (
-                  <TableRow key={receivable.id}>
+                  <TableRow key={receivable.id} className="hover:bg-slate-50/50 transition-colors">
                     <TableCell>
-                      <div className="font-medium">{receivable.name}</div>
-                      {receivable.description && (
-                        <div className="text-sm text-muted-foreground">{receivable.description}</div>
-                      )}
+                      <div className="font-semibold">{receivable.name}</div>
+                      <div className="text-[11px] text-muted-foreground line-clamp-1 italic">
+                        {receivable.description || 'Tanpa catatan'}
+                      </div>
                     </TableCell>
-                    <TableCell className="text-right">{formatCurrency(receivable.amount)}</TableCell>
-                    <TableCell className="text-right text-muted-foreground">
+                    <TableCell className="text-right font-mono text-sm">
+                      {formatCurrency(receivable.amount)}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground font-mono text-sm">
                       {formatCurrency(receivable.amount - receivable.remaining_amount)}
                     </TableCell>
-                    <TableCell className="text-right font-medium text-green-600">
+                    <TableCell className="text-right font-bold text-emerald-600 font-mono text-sm">
                       {formatCurrency(receivable.remaining_amount)}
                     </TableCell>
-                    <TableCell className={cn(isOverdue && 'text-destructive font-medium')}>
+                    <TableCell className={cn("text-xs", isOverdue && 'text-red-500 font-bold')}>
                       {receivable.due_date ? new Date(receivable.due_date).toLocaleDateString('id-ID') : '-'}
                     </TableCell>
-                    <TableCell>
-                      <Badge variant={badge.variant}>{badge.label}</Badge>
+                    <TableCell className="text-center">
+                      {/* Dropdown ini yang akan berisi query Supabase langsung */}
+                      <ReceivableStatusDropdown receivable={receivable} onRefresh={onRefresh} />
                     </TableCell>
                   </TableRow>
                 )
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      )}
+              })
+            )}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 }
