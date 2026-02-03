@@ -15,36 +15,37 @@ type PeriodType = 'daily' | 'monthly' | 'yearly' | 'all'
 
 function getDateRange(period: PeriodType, selectedDate?: string, selectedMonth?: string, selectedYear?: string) {
   const now = new Date()
-  let start: Date
-  let end: Date
+  let startStr: string
+  let endStr: string
+
+  const format = (d: Date) => d.toISOString().split('T')[0]
 
   switch (period) {
     case 'daily': {
       const targetDate = selectedDate ? new Date(selectedDate) : now
-      start = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 0, 0, 0)
-      end = new Date(targetDate.getFullYear(), targetDate.getMonth(), targetDate.getDate(), 23, 59, 59)
+      startStr = format(targetDate)
+      endStr = format(targetDate)
       break
     }
     case 'monthly': {
       const [year, month] = selectedMonth ? selectedMonth.split('-').map(Number) : [now.getFullYear(), now.getMonth() + 1]
-      start = new Date(year, month - 1, 1, 0, 0, 0)
-      end = new Date(year, month, 0, 23, 59, 59)
+      startStr = format(new Date(year, month - 1, 1))
+      endStr = format(new Date(year, month, 0))
       break
     }
     case 'yearly': {
       const year = selectedYear ? parseInt(selectedYear) : now.getFullYear()
-      start = new Date(year, 0, 1, 0, 0, 0)
-      end = new Date(year, 11, 31, 23, 59, 59)
+      startStr = `${year}-01-01`
+      endStr = `${year}-12-31`
       break
     }
-    case 'all':
     default:
-      start = new Date(2000, 0, 1)
-      end = new Date(2099, 11, 31)
+      startStr = '2000-01-01'
+      endStr = '2099-12-31'
       break
   }
 
-  return { start, end }
+  return { start: startStr, end: endStr }
 }
 
 export default function InvoicePage() {
@@ -56,39 +57,49 @@ export default function InvoicePage() {
   const [selectedMonth, setSelectedMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`)
   const [selectedYear, setSelectedYear] = useState(String(new Date().getFullYear()))
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    const supabase = createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { start, end } = getDateRange(period, selectedDate, selectedMonth, selectedYear)
-
-    const [invoicesRes, clientsRes] = await Promise.all([
-      supabase
-        .from('purchase_invoices')
-        .select('*, clients(*), purchase_invoice_items(*)')
-        .eq('user_id', user.id)
-        .gte('invoice_date', start.toISOString())
-        .lte('invoice_date', end.toISOString())
-        .order('invoice_date', { ascending: false }),
-      supabase
-        .from('clients')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('name')
-    ])
-
-    if (invoicesRes.data) {
-      setInvoices(invoicesRes.data.map(inv => ({
-        ...inv,
-        client: inv.clients,
-        items: inv.purchase_invoice_items
-      })) as PurchaseInvoice[])
-    }
-    if (clientsRes.data) setClients(clientsRes.data as Client[])
+const fetchData = useCallback(async () => {
+  setLoading(true)
+  const supabase = createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
     setLoading(false)
-  }, [period, selectedDate, selectedMonth, selectedYear])
+    return
+  }
+
+  const { start, end } = getDateRange(period, selectedDate, selectedMonth, selectedYear)
+
+  const [invoicesRes, clientsRes] = await Promise.all([
+    supabase
+      .from('purchase_invoices')
+      .select('*, clients(*), purchase_invoice_items(*)')
+      .eq('user_id', user.id)
+      .gte('invoice_date', start) // String YYYY-MM-DD
+      .lte('invoice_date', end)   // String YYYY-MM-DD
+      .order('invoice_date', { ascending: false }),
+    supabase
+      .from('clients')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('name')
+  ])
+
+  if (invoicesRes.error) {
+    console.error('Error fetching invoices:', invoicesRes.error.message)
+  }
+
+  if (invoicesRes.data) {
+    // Memastikan mapping data benar
+    const formattedInvoices = invoicesRes.data.map(inv => ({
+      ...inv,
+      client: inv.clients,
+      items: inv.purchase_invoice_items || []
+    }))
+    setInvoices(formattedInvoices as PurchaseInvoice[])
+  }
+  
+  if (clientsRes.data) setClients(clientsRes.data as Client[])
+  setLoading(false)
+}, [period, selectedDate, selectedMonth, selectedYear])
 
   useEffect(() => {
     fetchData()
