@@ -1,8 +1,6 @@
 'use client'
 
-import React from "react"
-
-import { useState } from 'react'
+import React, { useState } from "react"
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
@@ -17,7 +15,6 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
   SelectContent,
@@ -96,54 +93,91 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
     }
 
     const validItems = items.filter(item => item.description.trim() && item.unitPrice > 0)
-
-    if (validItems.length === 0) {
+    if (validItems.length === 0 || !clientId) {
       setIsLoading(false)
       return
     }
 
     const totalAmount = calculateTotal()
+    const selectedClient = clients.find(c => c.id === clientId)
 
-    // Create invoice
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('purchase_invoices')
-      .insert({
-        user_id: user.id,
-        client_id: clientId,
-        invoice_number: invoiceNumber,
-        description: description || null,
-        total_amount: totalAmount,
-        invoice_date: invoiceDate,
-        status: 'pending',
-      })
-      .select()
-      .single()
+    try {
+      // 1. Simpan Invoice Utama ke purchase_invoices
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('purchase_invoices')
+        .insert({
+          user_id: user.id,
+          client_id: clientId,
+          invoice_number: invoiceNumber,
+          description: description || null,
+          total_amount: totalAmount,
+          invoice_date: invoiceDate,
+          status: 'pending',
+        })
+        .select()
+        .single()
 
-    if (invoiceError || !invoice) {
+      if (invoiceError || !invoice) throw invoiceError
+
+      // 2. Simpan Detail Item ke purchase_invoice_items
+      const invoiceItems = validItems.map((item) => ({
+        purchase_invoice_id: invoice.id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+      }))
+      await supabase.from('purchase_invoice_items').insert(invoiceItems)
+
+      // 3. INTEGRASI OTOMATIS KE PENGELUARAN (EXPENSES)
+      // Cari kategori "Invoice Belanja"
+      let { data: category } = await supabase
+        .from('expense_categories')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('name', 'Invoice Belanja')
+        .maybeSingle()
+
+      // Jika kategori belum ada, buat otomatis
+      if (!category) {
+        const { data: newCat, error: catError } = await supabase
+          .from('expense_categories')
+          .insert({ name: 'Invoice Belanja', user_id: user.id })
+          .select()
+          .single()
+        if (catError) console.error("Gagal buat kategori:", catError)
+        category = newCat
+      }
+
+      // Masukkan transaksi ke tabel expenses
+      if (category) {
+        const { error: expError } = await supabase.from('expenses').insert({
+          user_id: user.id,
+          date: invoiceDate,
+          amount: totalAmount,
+          category_id: category.id,
+          client_id: clientId,
+          description: `Otomatis: Belanja ${invoiceNumber} (${selectedClient?.name || 'Client'})`,
+        })
+        if (expError) console.error("Gagal sinkron pengeluaran:", expError)
+      }
+
+      // Reset State & Close Dialog
+      setOpen(false)
+      setClientId('')
+      setClientSearch('')
+      setInvoiceNumber('')
+      setDescription('')
+      setInvoiceDate(new Date().toISOString().split('T')[0])
+      setItems([{ description: '', quantity: 1, unitPrice: 0 }])
+      
+      onSuccess()
+      router.refresh()
+    } catch (error) {
+      console.error("Terjadi kesalahan:", error)
+      alert("Gagal menyimpan invoice. Silakan coba lagi.")
+    } finally {
       setIsLoading(false)
-      return
     }
-
-    // Create invoice items
-    const invoiceItems = validItems.map((item) => ({
-      purchase_invoice_id: invoice.id,
-      description: item.description,
-      quantity: item.quantity,
-      unit_price: item.unitPrice,
-    }))
-
-    await supabase.from('purchase_invoice_items').insert(invoiceItems)
-
-    setIsLoading(false)
-    setOpen(false)
-    setClientId('')
-    setClientSearch('')
-    setInvoiceNumber('')
-    setDescription('')
-    setInvoiceDate(new Date().toISOString().split('T')[0])
-    setItems([{ description: '', quantity: 1, unitPrice: 0 }])
-    onSuccess()
-    router.refresh()
   }
 
   return (
@@ -159,11 +193,13 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
           <DialogHeader>
             <DialogTitle>Tambah Invoice Belanja</DialogTitle>
             <DialogDescription>
-              Buat invoice belanja bahan baku untuk pesanan client
+              Invoice ini akan otomatis dicatat sebagai pengeluaran bisnis.
             </DialogDescription>
           </DialogHeader>
+          
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-2 gap-4">
+            {/* Row 1: Client & Invoice Number */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="client">Client</Label>
                 <Select value={clientId} onValueChange={setClientId} required>
@@ -199,15 +235,16 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                   id="invoice-number"
                   value={invoiceNumber}
                   onChange={(e) => setInvoiceNumber(e.target.value)}
-                  placeholder="INV-001"
+                  placeholder="INV/2024/001"
                   required
                 />
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {/* Row 2: Date & Description */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="grid gap-2">
-                <Label htmlFor="invoice-date">Tanggal</Label>
+                <Label htmlFor="invoice-date">Tanggal Belanja</Label>
                 <Input
                   id="invoice-date"
                   type="date"
@@ -217,25 +254,33 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="description">Deskripsi (opsional)</Label>
+                <Label htmlFor="description">Catatan Tambahan</Label>
                 <Input
                   id="description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Deskripsi invoice"
+                  placeholder="Contoh: Belanja di Toko ABC"
                 />
               </div>
             </div>
 
+            {/* Item List Section */}
             <div className="space-y-3">
-              <Label>Item Belanja</Label>
+              <div className="flex items-center justify-between">
+                <Label className="text-base font-semibold">Daftar Item / Bahan Baku</Label>
+                <Button type="button" variant="outline" size="sm" onClick={addItem}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Tambah Baris
+                </Button>
+              </div>
+
               {items.map((item, index) => (
-                <div key={index} className="rounded-lg border p-3 space-y-2">
+                <div key={index} className="rounded-lg border bg-card p-3 shadow-sm space-y-3">
                   <div className="flex gap-2">
                     <Input
                       value={item.description}
                       onChange={(e) => updateItem(index, 'description', e.target.value)}
-                      placeholder="Nama item/bahan"
+                      placeholder="Nama bahan baku (cth: Tepung Terigu)"
                       className="flex-1"
                     />
                     {items.length > 1 && (
@@ -243,28 +288,26 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                         type="button"
                         variant="ghost"
                         size="icon"
+                        className="text-destructive hover:bg-destructive/10"
                         onClick={() => removeItem(index)}
                       >
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Qty</Label>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Jumlah</Label>
                       <Input
                         type="number"
                         step="0.01"
                         min="0"
                         value={item.quantity}
-                        onChange={(e) =>
-                        updateItem(index, 'quantity', parseFloat(e.target.value) || 0)
-                        }
+                        onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
                       />
-
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Harga Satuan</Label>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Harga Satuan</Label>
                       <Input
                         type="number"
                         value={item.unitPrice}
@@ -272,32 +315,38 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                         min="0"
                       />
                     </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Subtotal</Label>
-                      <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Subtotal</Label>
+                      <div className="flex h-10 items-center rounded-md border bg-muted/50 px-3 text-sm font-medium">
                         {formatCurrency(item.quantity * item.unitPrice)}
                       </div>
                     </div>
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={addItem}>
-                <Plus className="mr-2 h-4 w-4" />
-                Tambah Item
-              </Button>
             </div>
 
-            <div className="flex justify-between items-center p-4 bg-muted rounded-lg">
-              <span className="font-medium">Total Invoice</span>
-              <span className="text-lg font-bold">{formatCurrency(calculateTotal())}</span>
+            {/* Summary Total */}
+            <div className="flex justify-between items-center p-4 bg-primary/5 border border-primary/20 rounded-lg">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium text-muted-foreground">Total Keseluruhan</p>
+                <p className="text-xs text-muted-foreground italic">*Otomatis masuk ke laporan pengeluaran</p>
+              </div>
+              <span className="text-xl font-bold text-primary">{formatCurrency(calculateTotal())}</span>
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Batal
             </Button>
-            <Button type="submit" disabled={isLoading || !clientId || !invoiceNumber}>
-              {isLoading ? 'Menyimpan...' : 'Simpan'}
+            <Button type="submit" className="min-w-[120px]" disabled={isLoading || !clientId || !invoiceNumber}>
+              {isLoading ? (
+                <span className="flex items-center gap-2">
+                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Proses...
+                </span>
+              ) : 'Simpan Invoice'}
             </Button>
           </DialogFooter>
         </form>
