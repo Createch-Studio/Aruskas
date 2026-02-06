@@ -58,7 +58,7 @@ Buka terminal atau CMD, lalu jalankan perintah berikut:
 
 ```bash
 git clone https://github.com/Createch-Studio/Aruskas.git
-cd aruskas-erp
+cd Aruskas
 
 ```
 
