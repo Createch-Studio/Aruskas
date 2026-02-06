@@ -2,12 +2,19 @@
 
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Button } from '@/components/ui/button'
-import { Plus, Search } from 'lucide-react'
+import { Plus, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react'
 import type { Receivable } from '@/lib/types'
 import { formatCurrency, cn } from '@/lib/utils'
 import { AddReceivableDialog } from '@/components/add-receivable-dialog'
 import { ReceivableStatusDropdown } from '@/components/receivable-status-dropdown'
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 
 interface ReceivableTableProps {
   receivables: Receivable[]
@@ -17,26 +24,68 @@ interface ReceivableTableProps {
 export function ReceivableTable({ receivables, onRefresh }: ReceivableTableProps) {
   const [addDialogOpen, setAddDialogOpen] = useState(false)
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'unpaid' | 'paid'>('all')
+  
+  // State Pagination
+  const [currentPage, setCurrentPage] = useState(1)
+  const itemsPerPage = 10
 
-  // Filter data berdasarkan nama debitur
-  const filteredData = receivables.filter((item) =>
-    item.name.toLowerCase().includes(search.toLowerCase())
-  )
+  // Logika Filter: Gabungan Search & Status
+  const filteredData = useMemo(() => {
+    return receivables.filter((item) => {
+      const matchesSearch = item.name.toLowerCase().includes(search.toLowerCase())
+      const matchesStatus = 
+        statusFilter === 'all' ? true :
+        statusFilter === 'paid' ? item.status === 'paid' : 
+        item.status !== 'paid' // unpaid logic
+
+      return matchesSearch && matchesStatus
+    })
+  }, [receivables, search, statusFilter])
+
+  // Logika Pagination
+  const totalPages = Math.ceil(filteredData.length / itemsPerPage)
+  const startIndex = (currentPage - 1) * itemsPerPage
+  const paginatedData = filteredData.slice(startIndex, startIndex + itemsPerPage)
+
+  // Reset ke halaman 1 jika filter berubah
+  const handleFilterChange = (type: 'search' | 'status', value: string) => {
+    if (type === 'search') setSearch(value)
+    if (type === 'status') setStatusFilter(value as any)
+    setCurrentPage(1)
+  }
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-col sm:flex-row justify-between gap-4">
-        <div className="relative w-full sm:w-72">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder="Cari nama debitur..."
-            className="w-full pl-9 pr-4 py-2 border rounded-md text-sm focus:ring-1 focus:ring-primary outline-none"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+      <div className="flex flex-col md:flex-row justify-between gap-4">
+        <div className="flex flex-1 flex-col sm:flex-row gap-2">
+          {/* Search Input */}
+          <div className="relative w-full sm:w-72">
+            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Cari nama debitur..."
+              className="w-full pl-9 pr-4 py-2 border rounded-md text-sm focus:ring-1 focus:ring-primary outline-none bg-white"
+              value={search}
+              onChange={(e) => handleFilterChange('search', e.target.value)}
+            />
+          </div>
+
+          {/* Status Filter */}
+          <Select value={statusFilter} onValueChange={(val) => handleFilterChange('status', val)}>
+            <SelectTrigger className="w-full sm:w-[160px] bg-white">
+              <Filter className="mr-2 h-4 w-4 text-muted-foreground" />
+              <SelectValue placeholder="Semua Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Semua Status</SelectItem>
+              <SelectItem value="unpaid">Belum Lunas</SelectItem>
+              <SelectItem value="paid">Lunas</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
-        <Button onClick={() => setAddDialogOpen(true)}>
+
+        <Button onClick={() => setAddDialogOpen(true)} className="w-full sm:w-auto">
           <Plus className="mr-2 h-4 w-4" />
           Tambah Piutang
         </Button>
@@ -57,18 +106,18 @@ export function ReceivableTable({ receivables, onRefresh }: ReceivableTableProps
               <TableHead className="text-right">Diterima</TableHead>
               <TableHead className="text-right">Sisa</TableHead>
               <TableHead>Jatuh Tempo</TableHead>
-              <TableHead className="w-[80px] text-center">Status</TableHead>
+              <TableHead className="w-[100px] text-center">Status</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredData.length === 0 ? (
+            {paginatedData.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-10 text-muted-foreground">
+                <TableCell colSpan={6} className="text-center py-10 text-muted-foreground italic">
                   Data piutang tidak ditemukan.
                 </TableCell>
               </TableRow>
             ) : (
-              filteredData.map((receivable) => {
+              paginatedData.map((receivable) => {
                 if (!receivable.id) return null;
 
                 const isOverdue = 
@@ -79,7 +128,7 @@ export function ReceivableTable({ receivables, onRefresh }: ReceivableTableProps
                 return (
                   <TableRow key={receivable.id} className="hover:bg-slate-50/50 transition-colors">
                     <TableCell>
-                      <div className="font-semibold">{receivable.name}</div>
+                      <div className="font-semibold text-slate-900">{receivable.name}</div>
                       <div className="text-[11px] text-muted-foreground line-clamp-1 italic">
                         {receivable.description || 'Tanpa catatan'}
                       </div>
@@ -97,7 +146,6 @@ export function ReceivableTable({ receivables, onRefresh }: ReceivableTableProps
                       {receivable.due_date ? new Date(receivable.due_date).toLocaleDateString('id-ID') : '-'}
                     </TableCell>
                     <TableCell className="text-center">
-                      {/* Dropdown ini yang akan berisi query Supabase langsung */}
                       <ReceivableStatusDropdown receivable={receivable} onRefresh={onRefresh} />
                     </TableCell>
                   </TableRow>
@@ -107,6 +155,38 @@ export function ReceivableTable({ receivables, onRefresh }: ReceivableTableProps
           </TableBody>
         </Table>
       </div>
+
+      {/* Pagination Controls */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between px-2 py-2">
+          <div className="text-sm text-muted-foreground">
+            Menampilkan <span className="font-medium">{startIndex + 1}</span> -{' '}
+            <span className="font-medium">{Math.min(startIndex + itemsPerPage, filteredData.length)}</span>{' '}
+            dari <span className="font-medium">{filteredData.length}</span> piutang
+          </div>
+          <div className="flex items-center space-x-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-medium">
+              Hal {currentPage} dari {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+              disabled={currentPage === totalPages}
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
