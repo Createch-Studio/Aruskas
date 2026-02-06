@@ -246,7 +246,7 @@ export function AddSaleDialog({ products, clients, invoices, orders, onSuccess }
     router.refresh()
   }
 
-  const { totalAmount, totalCost } = calculateTotals()
+  const { totalAmount, totalCost, additionalCost } = calculateTotals()
   const profit = totalAmount - totalCost
 
   return (
@@ -265,197 +265,205 @@ export function AddSaleDialog({ products, clients, invoices, orders, onSuccess }
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
-          <div className="grid gap-4 py-4">
-            {availableOrders.length > 0 && (
-              <div className="grid gap-2">
-                <Label>Ambil dari Order (opsional)</Label>
-                <Select value={orderId} onValueChange={handleOrderSelect}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih order untuk diambil" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Tanpa Order</SelectItem>
-                    {availableOrders.map((order) => (
-                      <SelectItem key={order.id} value={order.id}>
-                        {order.order_number} - {order.client?.name || 'Tanpa Client'} ({formatCurrency(order.total_amount)})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Pilih order untuk mengisi item penjualan secara otomatis
-                </p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="grid gap-2">
-                <Label htmlFor="sale-date">Tanggal</Label>
-                <Input
-                  id="sale-date"
-                  type="date"
-                  value={saleDate}
-                  onChange={(e) => setSaleDate(e.target.value)}
-                  required
-                />
-              </div>
-              <div className="grid gap-2">
-                <Label>Client (opsional)</Label>
-                <Select value={clientId} onValueChange={(val) => {
-                  setClientId(val)
-                  setInvoiceId('none')
-                  setOrderId('none')
-                }}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih client" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Tanpa Client</SelectItem>
-                    {clients.map((client) => (
-                      <SelectItem key={client.id} value={client.id}>
-                        {client.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {availableInvoices.length > 0 && (
-              <div className="grid gap-2">
-                <Label>Invoice Belanja (opsional)</Label>
-                <Select value={invoiceId} onValueChange={setInvoiceId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pilih invoice belanja" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Tanpa Invoice</SelectItem>
-                    {availableInvoices.map((invoice) => (
-                      <SelectItem key={invoice.id} value={invoice.id}>
-                        {invoice.invoice_number} - {invoice.client?.name} ({formatCurrency(invoice.total_amount)})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Invoice belanja akan ditambahkan sebagai biaya tambahan ke harga modal
-                </p>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <Label>Item Penjualan</Label>
-              {items.map((item, index) => {
-                const selectedProduct = products.find((p) => p.id === item.productId)
-                return (
-                  <div key={index} className="rounded-lg border p-3 space-y-2">
-                    <div className="flex gap-2">
-                      <Select
-                        value={item.productId}
-                        onValueChange={(value) => updateItem(index, 'productId', value)}
-                      >
-                        <SelectTrigger className="flex-1">
-                          <SelectValue placeholder="Pilih produk" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {products.map((product) => (
-                            <SelectItem key={product.id} value={product.id}>
-                              {product.name} - {formatCurrency(product.price)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        type="number"
-                        value={item.quantity}
-                        onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
-                        min="1"
-                        className="w-20"
-                        placeholder="Qty"
-                      />
-                      {items.length > 1 && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => removeItem(index)}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      )}
-                    </div>
-                    {selectedProduct && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Harga Jual</Label>
-                          <Input
-                            type="number"
-                            value={item.customPrice ?? selectedProduct.price}
-                            onChange={(e) => updateItem(index, 'customPrice', e.target.value ? parseFloat(e.target.value) : null)}
-                            min="0"
-                            placeholder={`Default: ${formatCurrency(selectedProduct.price)}`}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Packaging Cost</Label>
-                          <Input
-                            type="number"
-                            value={item.customCost ?? selectedProduct.cost}
-                            onChange={(e) => updateItem(index, 'customCost', e.target.value ? parseFloat(e.target.value) : null)}
-                            min="0"
-                            placeholder={`Default: ${formatCurrency(selectedProduct.cost)}`}
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )
-              })}
-              <Button type="button" variant="outline" size="sm" onClick={addItem}>
-                <Plus className="mr-2 h-4 w-4" />
-                Tambah Item
-              </Button>
-            </div>
-
-            <div className="grid gap-2">
-              <Label htmlFor="notes">Catatan (opsional)</Label>
-              <Textarea
-                id="notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Catatan tambahan..."
-                rows={2}
-              />
-            </div>
-
-            <div className="rounded-lg border p-4 space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Total Penjualan:</span>
-                <span className="font-medium">{formatCurrency(totalAmount)}</span>
-              </div>
-              <div className="flex justify-between text-sm">
-                <span>Modal Produk:</span>
-                <span className="font-medium">{formatCurrency(totalCost - additionalCost)}</span>
-              </div>
-              {additionalCost > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span>Biaya Invoice Belanja:</span>
-                  <span className="font-medium">{formatCurrency(additionalCost)}</span>
+          {/* Scrollable content area */}
+          <div className="max-h-[70vh] overflow-y-auto pr-4 pb-6">
+            <div className="grid gap-4 py-4">
+              {availableOrders.length > 0 && (
+                <div className="grid gap-2">
+                  <Label>Ambil dari Order (opsional)</Label>
+                  <Select value={orderId} onValueChange={handleOrderSelect}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih order untuk diambil" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Tanpa Order</SelectItem>
+                      {availableOrders.map((order) => (
+                        <SelectItem key={order.id} value={order.id}>
+                          {order.order_number} - {order.client?.name || 'Tanpa Client'} ({formatCurrency(order.total_amount)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Pilih order untuk mengisi item penjualan secara otomatis
+                  </p>
                 </div>
               )}
-              <div className="flex justify-between text-sm">
-                <span>Total Modal:</span>
-                <span className="font-medium">{formatCurrency(totalCost)}</span>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="sale-date">Tanggal</Label>
+                  <Input
+                    id="sale-date"
+                    type="date"
+                    value={saleDate}
+                    onChange={(e) => setSaleDate(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Client (opsional)</Label>
+                  <Select value={clientId} onValueChange={(val) => {
+                    setClientId(val)
+                    setInvoiceId('none')
+                    setOrderId('none')
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih client" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Tanpa Client</SelectItem>
+                      {clients.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="flex justify-between text-sm font-semibold border-t pt-2">
-                <span>Profit:</span>
-                <span className={profit >= 0 ? 'text-green-600' : 'text-destructive'}>
-                  {formatCurrency(profit)}
-                </span>
+
+              {availableInvoices.length > 0 && (
+                <div className="grid gap-2">
+                  <Label>Invoice Belanja (opsional)</Label>
+                  <Select value={invoiceId} onValueChange={setInvoiceId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Pilih invoice belanja" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Tanpa Invoice</SelectItem>
+                      {availableInvoices.map((invoice) => (
+                        <SelectItem key={invoice.id} value={invoice.id}>
+                          {invoice.invoice_number} - {invoice.client?.name} ({formatCurrency(invoice.total_amount)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Invoice belanja akan ditambahkan sebagai biaya tambahan ke harga modal
+                  </p>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <Label>Item Penjualan</Label>
+                {items.map((item, index) => {
+                  const selectedProduct = products.find((p) => p.id === item.productId)
+                  return (
+                    <div key={index} className="rounded-lg border p-3 space-y-2">
+                      <div className="flex gap-2">
+                        <Select
+                          value={item.productId}
+                          onValueChange={(value) => updateItem(index, 'productId', value)}
+                        >
+                          <SelectTrigger className="flex-1">
+                            <SelectValue placeholder="Pilih produk" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {products.map((product) => (
+                              <SelectItem key={product.id} value={product.id}>
+                                {product.name} - {formatCurrency(product.price)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Input
+                          type="number"
+                          value={item.quantity}
+                          onChange={(e) => updateItem(index, 'quantity', parseInt(e.target.value) || 0)}
+                          min="1"
+                          className="w-20"
+                          placeholder="Qty"
+                        />
+                        {items.length > 1 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => removeItem(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                      {selectedProduct && (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Harga Jual</Label>
+                            <Input
+                              type="number"
+                              value={item.customPrice ?? selectedProduct.price}
+                              onChange={(e) => updateItem(index, 'customPrice', e.target.value ? parseFloat(e.target.value) : null)}
+                              min="0"
+                              placeholder={`Default: ${formatCurrency(selectedProduct.price)}`}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">Packaging Cost</Label>
+                            <Input
+                              type="number"
+                              value={item.customCost ?? selectedProduct.cost}
+                              onChange={(e) => updateItem(index, 'customCost', e.target.value ? parseFloat(e.target.value) : null)}
+                              min="0"
+                              placeholder={`Default: ${formatCurrency(selectedProduct.cost)}`}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                <Button type="button" variant="outline" size="sm" onClick={addItem}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Tambah Item
+                </Button>
+              </div>
+
+              <div className="grid gap-2">
+                <Label htmlFor="notes">Catatan (opsional)</Label>
+                <Textarea
+                  id="notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Catatan tambahan..."
+                  rows={2}
+                />
+              </div>
+
+              <div className="rounded-lg border p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span>Total Penjualan:</span>
+                  <span className="font-medium">{formatCurrency(totalAmount)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span>Modal Produk:</span>
+                  <span className="font-medium">{formatCurrency(totalCost - additionalCost)}</span>
+                </div>
+                {additionalCost > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span>Biaya Invoice Belanja:</span>
+                    <span className="font-medium">{formatCurrency(additionalCost)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span>Total Modal:</span>
+                  <span className="font-medium">{formatCurrency(totalCost)}</span>
+                </div>
+                <div className="flex justify-between text-sm font-semibold border-t pt-2">
+                  <span>Profit:</span>
+                  <span className={profit >= 0 ? 'text-green-600' : 'text-destructive'}>
+                    {formatCurrency(profit)}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
-          <DialogFooter>
+
+          {/* Sticky footer so actions remain visible while content scrolls */}
+          <DialogFooter className="sticky bottom-0 bg-white/80 backdrop-blur-sm py-3 border-t">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>
+              Batal
+            </Button>
             <Button type="submit" disabled={isLoading || items.every((i) => !i.productId)}>
               {isLoading ? 'Menyimpan...' : 'Simpan'}
             </Button>
