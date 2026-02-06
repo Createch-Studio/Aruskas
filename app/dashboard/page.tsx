@@ -8,16 +8,19 @@ async function getDashboardData(userId: string) {
   const supabase = await createClient()
   
   const now = new Date()
-  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString()
+  // 1. SET RENTANG WAKTU (Global 90 Hari untuk konsistensi)
+  const last90Days = new Date()
+  last90Days.setDate(last90Days.getDate() - 90)
+  const startDate = last90Days.toISOString()
+  const endDate = now.toISOString()
 
-  // 1. FETCH EXPENSES
+  // 2. FETCH EXPENSES (90 Hari)
   const { data: rawExpenses } = await supabase
     .from('expenses')
     .select('amount, expense_categories(name)')
     .eq('user_id', userId)
-    .gte('date', startOfMonth)
-    .lte('date', endOfMonth)
+    .gte('date', startDate)
+    .lte('date', endDate)
 
   const operationalExpenses = rawExpenses?.filter(e => 
     (e.expense_categories as any)?.name !== 'Invoice Belanja'
@@ -25,7 +28,7 @@ async function getDashboardData(userId: string) {
 
   const totalExpenses = operationalExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
 
-  // 2. FETCH SALES & TOP PRODUCTS
+  // 3. FETCH SALES (90 Hari)
   const { data: sales } = await supabase
     .from('sales')
     .select(`
@@ -39,8 +42,8 @@ async function getDashboardData(userId: string) {
       )
     `)
     .eq('user_id', userId)
-    .gte('sale_date', startOfMonth)
-    .lte('sale_date', endOfMonth)
+    .gte('sale_date', startDate)
+    .lte('sale_date', endDate)
 
   const totalSales = sales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0
   const totalPackagingCost = sales?.reduce((sum, s) => {
@@ -52,7 +55,7 @@ async function getDashboardData(userId: string) {
   const totalProfit = totalSales - totalPackagingCost - totalInvoiceCost - totalExpenses
   const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
 
-  // 3. LOGIKA TOP PRODUK
+  // 4. LOGIKA TOP PRODUK (Otomatis 90 Hari karena variabel sales)
   const productMap: Record<string, { name: string; quantity: number }> = {}
   sales?.forEach(sale => {
     const items = (sale.sale_items as any[]) || []
@@ -66,7 +69,7 @@ async function getDashboardData(userId: string) {
     .sort((a, b) => b.quantity - a.quantity)
     .slice(0, 5)
 
-  // 4. DATA CHART PENGELUARAN
+  // 5. DATA CHART PENGELUARAN (Otomatis 90 Hari)
   const categoryTotals: Record<string, number> = {}
   operationalExpenses.forEach((e) => {
     const categoryName = (e.expense_categories as any)?.name || 'Lainnya'
@@ -77,24 +80,9 @@ async function getDashboardData(userId: string) {
     amount,
   }))
 
-  // 5. TREND 90 HARI (Sinkronisasi Key: penjualan & profit)
-  const last90Days = new Date()
-  last90Days.setDate(last90Days.getDate() - 90)
-  
-  const { data: recentSales } = await supabase
-    .from('sales')
-    .select(`
-      sale_date, 
-      total_amount, 
-      additional_cost,
-      sale_items (quantity, unit_cost)
-    `)
-    .eq('user_id', userId)
-    .gte('sale_date', last90Days.toISOString())
-    .order('sale_date', { ascending: true })
-
+  // 6. TREND CHART DATA
   const salesByDate: Record<string, { sales: number; profit: number }> = {}
-  recentSales?.forEach((s) => {
+  sales?.forEach((s) => {
     const dateKey = s.sale_date 
     if (!salesByDate[dateKey]) salesByDate[dateKey] = { sales: 0, profit: 0 }
     
@@ -108,7 +96,7 @@ async function getDashboardData(userId: string) {
   const salesChartData = Object.entries(salesByDate)
     .map(([date, values]) => ({
       date: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-      penjualan: values.sales, // Key diubah ke 'penjualan'
+      penjualan: values.sales,
       profit: values.profit,    
       rawDate: date
     }))
@@ -138,38 +126,40 @@ export default async function DashboardPage() {
       <div className="flex flex-col gap-1">
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
         <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
-          <Calendar className="h-4 w-4" /> Monitoring Performa Bisnis
+          <Calendar className="h-4 w-4" /> Performa Bisnis (90 Hari Terakhir)
         </p>
       </div>
 
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <SummaryCard title="Omzet Bulan Ini" value={data.totalSales} subtitle="Total pendapatan kotor" color="blue" />
-        <SummaryCard title="Biaya & HPP" value={data.totalExpenses + data.totalHpp} subtitle={`HPP: ${formatCurrency(data.totalHpp)} | Ops: ${formatCurrency(data.totalExpenses)}`} color="orange" />
-        <SummaryCard title="Profit Bersih" value={data.totalProfit} subtitle="Sudah dikurangi semua biaya" color="green" isProfit />
-        <SummaryCard title="Margin" value={`${data.profitMargin.toFixed(1)}%`} subtitle="Efficiency Level" color="slate" isRaw />
+        <SummaryCard title="Omzet (90 Hari)" value={data.totalSales} subtitle="Total pendapatan kotor" color="blue" />
+        <SummaryCard title="Biaya & HPP" value={data.totalExpenses + data.totalHpp} subtitle="HPP + Ops" color="orange" />
+        <SummaryCard title="Profit Bersih" value={data.totalProfit} subtitle="Estimasi keuntungan" color="green" isProfit />
+        <SummaryCard title="Margin" value={`${data.profitMargin.toFixed(1)}%`} subtitle="Tingkat efisiensi" color="slate" isRaw />
       </div>
 
-      {/* Main Chart: Tren Penjualan & Profit */}
+      {/* Area Chart Utama */}
       <Card className="shadow-sm border-slate-200">
-        <CardHeader className="flex flex-row items-center justify-between pb-8">
+        <CardHeader>
           <CardTitle className="text-base font-semibold flex items-center gap-2">
-            <TrendingUp className="h-4 w-4 text-blue-500" /> Tren Penjualan & Profit (90 Hari)
+            <TrendingUp className="h-4 w-4 text-blue-500" /> Tren Penjualan & Profit
           </CardTitle>
         </CardHeader>
         <CardContent className="h-[350px]">
           {data.salesChartData.length > 0 ? (
             <SalesChart data={data.salesChartData} />
           ) : (
-            <div className="flex h-full items-center justify-center text-muted-foreground text-sm italic">Belum ada data penjualan</div>
+            <NoData />
           )}
         </CardContent>
       </Card>
 
-      {/* Bottom Grid: Expenses & Products */}
+      {/* Row Bawah Berdampingan */}
       <div className="grid gap-4 lg:grid-cols-2">
         <Card className="shadow-sm border-slate-200">
-          <CardHeader><CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle>
+          </CardHeader>
           <CardContent className="h-[350px]">
              {data.expenseChartData.length > 0 ? <ExpenseChart data={data.expenseChartData} /> : <NoData />}
           </CardContent>
@@ -200,6 +190,7 @@ export default async function DashboardPage() {
   )
 }
 
+// Helpers
 function SummaryCard({ title, value, subtitle, color, isProfit, isRaw }: any) {
   const colorMap: any = { blue: 'border-l-blue-500', orange: 'border-l-orange-500', green: 'border-l-green-500', slate: 'border-l-slate-400' }
   return (
@@ -213,4 +204,4 @@ function SummaryCard({ title, value, subtitle, color, isProfit, isRaw }: any) {
   )
 }
 
-function NoData() { return <div className="flex h-full items-center justify-center text-muted-foreground text-sm italic">Belum ada data</div> }
+function NoData() { return <div className="flex h-full items-center justify-center text-muted-foreground text-sm italic">Belum ada data periode ini</div> }
