@@ -303,7 +303,7 @@ export function AddSaleDialog({ products, clients, invoices, orders, onSuccess }
                             <Input type="number" value={item.customPrice ?? selectedProduct.price} onChange={(e) => updateItem(index, 'customPrice', e.target.value ? parseFloat(e.target.value) : null)} />
                           </div>
                           <div className="space-y-1">
-                            <Label className="text-[10px] uppercase text-muted-foreground">Modal</Label>
+                            <Label className="text-[10px] uppercase text-muted-foreground">Biaya Tambahan</Label>
                             <Input type="number" value={item.customCost ?? selectedProduct.cost} onChange={(e) => updateItem(index, 'customCost', e.target.value ? parseFloat(e.target.value) : null)} />
                           </div>
                         </div>

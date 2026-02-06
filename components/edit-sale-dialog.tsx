@@ -376,7 +376,7 @@ export function EditSaleDialog({ sale, products, clients, invoices, open, onOpen
                           />
                         </div>
                         <div className="space-y-1">
-                          <Label className="text-xs text-muted-foreground">Packaging Cost</Label>
+                          <Label className="text-xs text-muted-foreground">Biaya Tambahan</Label>
                           <Input
                             type="number"
                             value={item.customCost ?? selectedProduct.cost}
