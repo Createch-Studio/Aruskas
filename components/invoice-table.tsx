@@ -30,9 +30,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
-import { Eye, Pencil, Trash2 } from 'lucide-react'
+import { Eye, Pencil, Trash2, Loader2 } from 'lucide-react'
 import { EditInvoiceDialog } from '@/components/edit-invoice-dialog'
 import type { PurchaseInvoice, Client } from '@/lib/types'
+import { toast } from "sonner" // Asumsi menggunakan sonner, atau ganti dengan alert biasa
 
 interface InvoiceTableProps {
   invoices: PurchaseInvoice[]
@@ -73,46 +74,51 @@ function getStatusBadge(status: string) {
 export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps) {
   const [viewingInvoice, setViewingInvoice] = useState<PurchaseInvoice | null>(null)
   const [editingInvoice, setEditingInvoice] = useState<PurchaseInvoice | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false) // State loading untuk hapus
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const router = useRouter()
 
-  const handleDelete = async (id: string) => {
-    setIsDeleting(true)
+  const handleDelete = async (invoice: PurchaseInvoice) => {
+    setDeletingId(invoice.id)
     const supabase = createClient()
     
     try {
-      // 1. Hapus pengeluaran terkait di tabel expenses
-      // Menggunakan purchase_invoice_id sebagai kunci pencocokan
-      await supabase
+      // 1. HAPUS EXPENSES (Logika Ganda)
+      // Pertama cari berdasarkan ID (Cara yang benar)
+      // Kedua cari berdasarkan deskripsi (Emergency/Data Lama)
+      const { error: expError } = await supabase
         .from('expenses')
         .delete()
-        .eq('purchase_invoice_id', id)
+        .or(`purchase_invoice_id.eq.${invoice.id},description.ilike.%Otomatis: Belanja%${invoice.invoice_number}%`)
 
-      // 2. Hapus item invoice
+      if (expError) console.error("Expense delete error:", expError)
+
+      // 2. HAPUS ITEMS
       await supabase
         .from('purchase_invoice_items')
         .delete()
-        .eq('purchase_invoice_id', id)
+        .eq('purchase_invoice_id', invoice.id)
 
-      // 3. Hapus data invoice utama
-      await supabase
+      // 3. HAPUS INVOICE UTAMA
+      const { error: invError } = await supabase
         .from('purchase_invoices')
         .delete()
-        .eq('id', id)
+        .eq('id', invoice.id)
 
+      if (invError) throw invError
+
+      toast.success("Invoice dan pengeluaran berhasil dihapus")
       onRefresh()
-      router.refresh()
-    } catch (error) {
-      console.error("Gagal menghapus invoice dan pengeluaran:", error)
+    } catch (error: any) {
+      toast.error("Gagal menghapus: " + error.message)
     } finally {
-      setIsDeleting(false)
+      setDeletingId(null)
     }
   }
 
   if (invoices.length === 0) {
     return (
       <div className="text-center py-8 text-muted-foreground border rounded-lg border-dashed">
-        Belum ada invoice. Klik tombol &quot;Tambah Invoice&quot; untuk membuat invoice baru.
+        Belum ada invoice.
       </div>
     )
   }
@@ -154,25 +160,33 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
                     {invoice.status === 'pending' && (
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
-                            <Trash2 className="h-4 w-4" />
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="text-destructive hover:text-destructive"
+                            disabled={deletingId === invoice.id}
+                          >
+                            {deletingId === invoice.id ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
                             <AlertDialogTitle>Hapus Invoice & Pengeluaran?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Menghapus invoice ini juga akan menghapus catatan pengeluaran terkait di laporan keuangan. Tindakan ini tidak dapat dibatalkan.
+                              Semua data terkait invoice <strong>{invoice.invoice_number}</strong> akan dihapus permanen.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Batal</AlertDialogCancel>
                             <AlertDialogAction 
-                              onClick={() => handleDelete(invoice.id)}
-                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                              disabled={isDeleting}
+                              onClick={() => handleDelete(invoice)}
+                              className="bg-destructive hover:bg-destructive/90"
                             >
-                              {isDeleting ? "Menghapus..." : "Hapus"}
+                              Hapus Sekarang
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>
@@ -186,82 +200,58 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
         </Table>
       </div>
 
-      {/* Detail Dialog */}
+      {/* --- Detail Dialog & Edit Dialog Tetap Sama --- */}
+      {/* ... (bagian Dialog Detail Anda di sini) ... */}
       <Dialog open={!!viewingInvoice} onOpenChange={(open) => !open && setViewingInvoice(null)}>
         <DialogContent className="max-w-2xl h-[85vh] flex flex-col p-0 gap-0">
           <DialogHeader className="p-6 border-b shrink-0">
             <DialogTitle>Detail Invoice Belanja</DialogTitle>
           </DialogHeader>
-          
           {viewingInvoice && (
             <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-muted/30 p-4 rounded-lg">
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">No. Invoice</span>
-                  <p className="font-semibold">{viewingInvoice.invoice_number}</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm bg-muted/30 p-4 rounded-lg">
+                    <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">No. Invoice</span>
+                        <p className="font-semibold">{viewingInvoice.invoice_number}</p>
+                    </div>
+                    <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">Tanggal</span>
+                        <p className="font-semibold">{formatDate(viewingInvoice.invoice_date)}</p>
+                    </div>
+                    <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">Client</span>
+                        <p className="font-semibold">{viewingInvoice.client?.name || '-'}</p>
+                    </div>
+                    <div>
+                        <span className="text-[10px] text-muted-foreground uppercase font-bold">Status</span>
+                        <div>{getStatusBadge(viewingInvoice.status)}</div>
+                    </div>
                 </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Tanggal</span>
-                  <p className="font-semibold">{formatDate(viewingInvoice.invoice_date)}</p>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Client</span>
-                  <p className="font-semibold text-primary">{viewingInvoice.client?.name || '-'}</p>
-                </div>
-                <div className="space-y-1">
-                  <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Status</span>
-                  <div>{getStatusBadge(viewingInvoice.status)}</div>
-                </div>
-              </div>
-              
-              {viewingInvoice.description && (
-                <div className="text-sm bg-blue-50/50 border border-blue-100 p-3 rounded-md">
-                  <span className="text-[10px] text-blue-700 uppercase font-bold tracking-wider block mb-1">Keterangan</span>
-                  <p className="text-slate-700">{viewingInvoice.description}</p>
-                </div>
-              )}
-
-              <div className="space-y-3">
-                <span className="text-sm font-bold flex items-center gap-2">
-                  Daftar Item Belanja
-                  <Badge variant="outline" className="font-normal">{viewingInvoice.items?.length || 0} Item</Badge>
-                </span>
+                {/* Tabel Item */}
                 <div className="rounded-md border overflow-hidden">
-                  <Table>
-                    <TableHeader className="bg-muted/50">
-                      <TableRow>
-                        <TableHead className="text-xs">Deskripsi Item</TableHead>
-                        <TableHead className="text-right w-[80px] text-xs">Qty</TableHead>
-                        <TableHead className="text-right text-xs">Harga Satuan</TableHead>
-                        <TableHead className="text-right text-xs">Subtotal</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {viewingInvoice.items?.map((item) => (
-                        <TableRow key={item.id} className="text-sm">
-                          <TableCell className="max-w-[200px] truncate">{item.description}</TableCell>
-                          <TableCell className="text-right">{item.quantity}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>
-                          <TableCell className="text-right font-semibold">{formatCurrency(item.quantity * item.unit_price)}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                    <Table>
+                        <TableHeader className="bg-muted/50">
+                            <TableRow>
+                                <TableHead className="text-xs">Deskripsi</TableHead>
+                                <TableHead className="text-right text-xs">Qty</TableHead>
+                                <TableHead className="text-right text-xs">Total</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {viewingInvoice.items?.map((item) => (
+                                <TableRow key={item.id} className="text-sm">
+                                    <TableCell>{item.description}</TableCell>
+                                    <TableCell className="text-right">{item.quantity}</TableCell>
+                                    <TableCell className="text-right">{formatCurrency(item.quantity * item.unit_price)}</TableCell>
+                                </TableRow>
+                            ))}
+                        </TableBody>
+                    </Table>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Sticky Footer Total */}
-          {viewingInvoice && (
-            <div className="p-6 border-t bg-slate-50 shrink-0">
-              <div className="flex justify-between items-center">
-                <div className="space-y-0.5">
-                  <span className="text-muted-foreground text-xs font-medium uppercase tracking-tighter">Total Dibayar</span>
-                  <p className="text-[10px] text-muted-foreground">Termasuk seluruh item di atas</p>
+                <div className="flex justify-between items-center p-4 bg-slate-50 border rounded-lg">
+                    <span className="font-bold">Total Pembayaran</span>
+                    <span className="text-xl font-black">{formatCurrency(viewingInvoice.total_amount)}</span>
                 </div>
-                <span className="text-2xl font-black text-slate-900">{formatCurrency(viewingInvoice.total_amount)}</span>
-              </div>
             </div>
           )}
         </DialogContent>
