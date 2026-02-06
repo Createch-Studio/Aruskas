@@ -1,53 +1,51 @@
 import { createClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { TrendingUp, TrendingDown, DollarSign, Percent } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Percent, Calendar } from 'lucide-react'
 import { ExpenseChart } from '@/components/expense-chart'
 import { SalesChart } from '@/components/sales-chart'
 
 async function getDashboardData(userId: string) {
   const supabase = await createClient()
   
-  // Get current month date range
+  // Get current month date range (for Summary Cards)
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString()
 
-  // Get total expenses for current month
-  const { data: expenses } = await supabase
-    .from('expenses')
-    .select('amount')
-    .eq('user_id', userId)
-    .gte('date', startOfMonth)
-    .lte('date', endOfMonth)
-
-  const totalExpenses = expenses?.reduce((sum, e) => sum + Number(e.amount), 0) || 0
-
-  // Get total sales and costs for current month
-  const { data: sales } = await supabase
-    .from('sales')
-    .select('total_amount, total_cost')
-    .eq('user_id', userId)
-    .gte('sale_date', startOfMonth)
-    .lte('sale_date', endOfMonth)
-
-  const totalSales = sales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0
-  const totalCost = sales?.reduce((sum, s) => sum + Number(s.total_cost), 0) || 0
-
-  // Calculate profit (sales - cost - expenses)
-  const totalProfit = totalSales - totalCost - totalExpenses
-  const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
-
-  // Get expenses by category for chart
-  const { data: expensesByCategory } = await supabase
+  // 1. Get Expenses (Current Month)
+  const { data: rawExpenses } = await supabase
     .from('expenses')
     .select('amount, expense_categories(name)')
     .eq('user_id', userId)
     .gte('date', startOfMonth)
     .lte('date', endOfMonth)
 
+  const operationalExpensesData = rawExpenses?.filter(e => 
+    (e.expense_categories as any)?.name !== 'Invoice Belanja'
+  ) || []
+
+  const totalExpenses = operationalExpensesData.reduce((sum, e) => sum + Number(e.amount), 0)
+
+  // 2. Get Sales (Current Month)
+  const { data: sales } = await supabase
+    .from('sales')
+    .select('total_amount, total_cost, additional_cost')
+    .eq('user_id', userId)
+    .gte('sale_date', startOfMonth)
+    .lte('sale_date', endOfMonth)
+
+  const totalSales = sales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0
+  const totalHpp = sales?.reduce((sum, s) => 
+    sum + Number(s.total_cost || 0) + Number(s.additional_cost || 0), 0
+  ) || 0
+
+  const totalProfit = totalSales - totalHpp - totalExpenses
+  const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
+
+  // 3. Prepare Expense Chart Data
   const categoryTotals: Record<string, number> = {}
-  expensesByCategory?.forEach((e) => {
-    const categoryName = (e.expense_categories as { name: string } | null)?.name || 'Lainnya'
+  operationalExpensesData.forEach((e) => {
+    const categoryName = (e.expense_categories as any)?.name || 'Lainnya'
     categoryTotals[categoryName] = (categoryTotals[categoryName] || 0) + Number(e.amount)
   })
 
@@ -56,19 +54,20 @@ async function getDashboardData(userId: string) {
     amount,
   }))
 
-  // Get sales by date for chart (last 7 days)
-  const last7Days = new Date()
-  last7Days.setDate(last7Days.getDate() - 7)
+  // 4. TREND 90 HARI TERAKHIR
+  const last90Days = new Date()
+  last90Days.setDate(last90Days.getDate() - 90)
   
   const { data: recentSales } = await supabase
     .from('sales')
-    .select('sale_date, total_amount, total_cost')
+    .select('sale_date, total_amount, total_cost, additional_cost')
     .eq('user_id', userId)
-    .gte('sale_date', last7Days.toISOString())
+    .gte('sale_date', last90Days.toISOString())
     .order('sale_date', { ascending: true })
 
   const salesByDate: Record<string, { sales: number; profit: number }> = {}
   recentSales?.forEach((s) => {
+    // Format tanggal lebih singkat (Tgl/Bln) agar tidak penuh di chart 90 hari
     const date = new Date(s.sale_date).toLocaleDateString('id-ID', { 
       day: 'numeric', 
       month: 'short' 
@@ -76,8 +75,9 @@ async function getDashboardData(userId: string) {
     if (!salesByDate[date]) {
       salesByDate[date] = { sales: 0, profit: 0 }
     }
+    const saleHpp = Number(s.total_cost || 0) + Number(s.additional_cost || 0)
     salesByDate[date].sales += Number(s.total_amount)
-    salesByDate[date].profit += Number(s.total_amount) - Number(s.total_cost)
+    salesByDate[date].profit += Number(s.total_amount) - saleHpp
   })
 
   const salesChartData = Object.entries(salesByDate).map(([date, data]) => ({
@@ -89,6 +89,7 @@ async function getDashboardData(userId: string) {
   return {
     totalExpenses,
     totalSales,
+    totalHpp,
     totalProfit,
     profitMargin,
     expenseChartData,
@@ -105,104 +106,110 @@ function formatCurrency(amount: number) {
   }).format(amount)
 }
 
+function cn(...classes: (string | boolean | undefined)[]) {
+  return classes.filter(Boolean).join(' ')
+}
+
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) {
-    return null
-  }
-
+  if (!user) return null
   const data = await getDashboardData(user.id)
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground">
-          Ringkasan keuangan bulan ini
+      <div className="flex flex-col gap-1">
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+        <p className="text-muted-foreground flex items-center gap-2">
+          <Calendar className="h-4 w-4" /> Monitoring Performa & Tren 90 Hari
         </p>
       </div>
 
+      {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
+        <Card className="border-l-4 border-l-blue-500 shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Penjualan</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Omzet Bulan Ini</CardTitle>
+            <DollarSign className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(data.totalSales)}</div>
-            <p className="text-xs text-muted-foreground">Bulan ini</p>
+            <p className="text-xs text-muted-foreground mt-1 italic">Total pendapatan kotor</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-orange-500 shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Pengeluaran</CardTitle>
-            <TrendingDown className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium">Biaya Operasional</CardTitle>
+            <TrendingDown className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(data.totalExpenses)}</div>
-            <p className="text-xs text-muted-foreground">Bulan ini</p>
+            <p className="text-xs text-orange-600 font-medium mt-1">HPP: {formatCurrency(data.totalHpp)}</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-green-500 shadow-sm bg-green-50/30">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Profit</CardTitle>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-green-800">Profit Bersih</CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
             <div className={cn(
               "text-2xl font-bold",
-              data.totalProfit >= 0 ? "text-green-600" : "text-destructive"
+              data.totalProfit >= 0 ? "text-green-700" : "text-destructive"
             )}>
               {formatCurrency(data.totalProfit)}
             </div>
-            <p className="text-xs text-muted-foreground">Bulan ini</p>
+            <p className="text-xs text-muted-foreground mt-1">Bulan berjalan</p>
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="border-l-4 border-l-slate-400 shadow-sm">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Profit Margin</CardTitle>
-            <Percent className="h-4 w-4 text-muted-foreground" />
+            <Percent className="h-4 w-4 text-slate-500" />
           </CardHeader>
           <CardContent>
             <div className={cn(
               "text-2xl font-bold",
-              data.profitMargin >= 0 ? "text-green-600" : "text-destructive"
+              data.profitMargin >= 0 ? "text-slate-800" : "text-destructive"
             )}>
               {data.profitMargin.toFixed(1)}%
             </div>
-            <p className="text-xs text-muted-foreground">Bulan ini</p>
+            <p className="text-xs text-muted-foreground mt-1">Efisiensi operasional</p>
           </CardContent>
         </Card>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
-        <Card>
+      <div className="grid gap-4 lg:grid-cols-7">
+        {/* Sales Chart - Diperlebar karena data 90 hari cukup banyak */}
+        <Card className="lg:col-span-4 shadow-sm">
           <CardHeader>
-            <CardTitle>Pengeluaran per Kategori</CardTitle>
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <TrendingUp className="h-4 w-4" /> Tren Penjualan & Profit (90 Hari Terakhir)
+            </CardTitle>
           </CardHeader>
           <CardContent>
-            <ExpenseChart data={data.expenseChartData} />
+            <div className="h-[300px]">
+              <SalesChart data={data.salesChartData} />
+            </div>
           </CardContent>
         </Card>
 
-        <Card>
+        {/* Expense Chart */}
+        <Card className="lg:col-span-3 shadow-sm">
           <CardHeader>
-            <CardTitle>Penjualan 7 Hari Terakhir</CardTitle>
+            <CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle>
           </CardHeader>
           <CardContent>
-            <SalesChart data={data.salesChartData} />
+            <div className="h-[300px]">
+              <ExpenseChart data={data.expenseChartData} />
+            </div>
           </CardContent>
         </Card>
       </div>
     </div>
   )
-}
-
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(' ')
 }
