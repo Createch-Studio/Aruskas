@@ -76,9 +76,7 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
 
   const handleDelete = async (id: string) => {
     const supabase = createClient()
-    // Delete items first
     await supabase.from('purchase_invoice_items').delete().eq('purchase_invoice_id', id)
-    // Then delete invoice
     await supabase.from('purchase_invoices').delete().eq('id', id)
     onRefresh()
     router.refresh()
@@ -94,140 +92,136 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
 
   return (
     <>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>No. Invoice</TableHead>
-            <TableHead>Tanggal</TableHead>
-            <TableHead>Client</TableHead>
-            <TableHead>Deskripsi</TableHead>
-            <TableHead className="text-right">Total</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead className="w-[100px]">Aksi</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {invoices.map((invoice) => (
-            <TableRow key={invoice.id}>
-              <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
-              <TableCell>{formatDate(invoice.invoice_date)}</TableCell>
-              <TableCell>{invoice.client?.name || '-'}</TableCell>
-              <TableCell>{invoice.description || '-'}</TableCell>
-              <TableCell className="text-right">{formatCurrency(invoice.total_amount)}</TableCell>
-              <TableCell>{getStatusBadge(invoice.status)}</TableCell>
-              <TableCell>
-                <div className="flex gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => setViewingInvoice(invoice)}
-                  >
-                    <Eye className="h-4 w-4" />
-                    <span className="sr-only">Lihat</span>
-                  </Button>
-                  {invoice.status === 'pending' && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setEditingInvoice(invoice)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                      <span className="sr-only">Edit</span>
-                    </Button>
-                  )}
-                  {invoice.status === 'pending' && (
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button variant="ghost" size="icon">
-                          <Trash2 className="h-4 w-4" />
-                          <span className="sr-only">Hapus</span>
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle>Hapus Invoice?</AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Tindakan ini tidak dapat dibatalkan. Invoice akan dihapus secara permanen.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Batal</AlertDialogCancel>
-                          <AlertDialogAction onClick={() => handleDelete(invoice.id)}>
-                            Hapus
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  )}
-                </div>
-              </TableCell>
+      <div className="rounded-md border overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>No. Invoice</TableHead>
+              <TableHead>Tanggal</TableHead>
+              <TableHead>Client</TableHead>
+              <TableHead>Deskripsi</TableHead>
+              <TableHead className="text-right">Total</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead className="w-[100px]">Aksi</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {invoices.map((invoice) => (
+              <TableRow key={invoice.id}>
+                <TableCell className="font-medium">{invoice.invoice_number}</TableCell>
+                <TableCell>{formatDate(invoice.invoice_date)}</TableCell>
+                <TableCell>{invoice.client?.name || '-'}</TableCell>
+                <TableCell>{invoice.description || '-'}</TableCell>
+                <TableCell className="text-right">{formatCurrency(invoice.total_amount)}</TableCell>
+                <TableCell>{getStatusBadge(invoice.status)}</TableCell>
+                <TableCell>
+                  <div className="flex gap-1">
+                    <Button variant="ghost" size="icon" onClick={() => setViewingInvoice(invoice)}>
+                      <Eye className="h-4 w-4" />
+                    </Button>
+                    {invoice.status === 'pending' && (
+                      <Button variant="ghost" size="icon" onClick={() => setEditingInvoice(invoice)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {invoice.status === 'pending' && (
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button variant="ghost" size="icon">
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Hapus Invoice?</AlertDialogTitle>
+                            <AlertDialogDescription>Tindakan ini tidak dapat dibatalkan.</AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Batal</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => handleDelete(invoice.id)}>Hapus</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    )}
+                  </div>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
 
+      {/* Detail Dialog dengan Scroll */}
       <Dialog open={!!viewingInvoice} onOpenChange={(open) => !open && setViewingInvoice(null)}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl h-[85vh] flex flex-col p-0 gap-0">
+          <DialogHeader className="p-6 border-b">
             <DialogTitle>Detail Invoice</DialogTitle>
           </DialogHeader>
+          
           {viewingInvoice && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">No. Invoice:</span>
-                  <p className="font-medium">{viewingInvoice.invoice_number}</p>
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              {/* Info Header */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase">No. Invoice</span>
+                  <p className="font-semibold">{viewingInvoice.invoice_number}</p>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Tanggal:</span>
-                  <p className="font-medium">{formatDate(viewingInvoice.invoice_date)}</p>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase">Tanggal</span>
+                  <p className="font-semibold">{formatDate(viewingInvoice.invoice_date)}</p>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Client:</span>
-                  <p className="font-medium">{viewingInvoice.client?.name}</p>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase">Client</span>
+                  <p className="font-semibold">{viewingInvoice.client?.name || '-'}</p>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Status:</span>
-                  <p>{getStatusBadge(viewingInvoice.status)}</p>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase">Status</span>
+                  <div>{getStatusBadge(viewingInvoice.status)}</div>
                 </div>
               </div>
               
               {viewingInvoice.description && (
-                <div className="text-sm">
-                  <span className="text-muted-foreground">Deskripsi:</span>
+                <div className="text-sm bg-muted/50 p-3 rounded-md">
+                  <span className="text-xs text-muted-foreground uppercase block mb-1">Deskripsi</span>
                   <p>{viewingInvoice.description}</p>
                 </div>
               )}
 
+              {/* Items Table Section */}
               <div className="space-y-2">
-                <span className="text-sm text-muted-foreground">Item Belanja:</span>
-                <div className="rounded-md border">
+                <span className="text-sm font-semibold">Daftar Item Belanja</span>
+                <div className="rounded-md border overflow-hidden">
                   <Table>
-                    <TableHeader>
+                    <TableHeader className="bg-muted/50">
                       <TableRow>
-                        <TableHead>Item</TableHead>
-                        <TableHead className="text-right">Qty</TableHead>
-                        <TableHead className="text-right">Harga</TableHead>
+                        <TableHead>Deskripsi Item</TableHead>
+                        <TableHead className="text-right w-[80px]">Qty</TableHead>
+                        <TableHead className="text-right">Harga Satuan</TableHead>
                         <TableHead className="text-right">Subtotal</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {viewingInvoice.items?.map((item) => (
                         <TableRow key={item.id}>
-                          <TableCell>{item.description}</TableCell>
-                          <TableCell className="text-right">{item.quantity}</TableCell>
+                          <TableCell className="max-w-[200px] truncate">{item.description}</TableCell>
+                          <TableCell className="text-right font-medium">{item.quantity}</TableCell>
                           <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>
-                          <TableCell className="text-right">{formatCurrency(item.quantity * item.unit_price)}</TableCell>
+                          <TableCell className="text-right font-semibold">{formatCurrency(item.quantity * item.unit_price)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
                   </Table>
                 </div>
               </div>
+            </div>
+          )}
 
-              <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
-                <span className="font-medium">Total</span>
-                <span className="text-lg font-bold">{formatCurrency(viewingInvoice.total_amount)}</span>
+          {/* Sticky Footer Total */}
+          {viewingInvoice && (
+            <div className="p-6 border-t bg-muted/20">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground font-medium">Total Keseluruhan</span>
+                <span className="text-xl font-bold text-primary">{formatCurrency(viewingInvoice.total_amount)}</span>
               </div>
             </div>
           )}
