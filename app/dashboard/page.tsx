@@ -1,18 +1,17 @@
 import { createClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { TrendingUp, TrendingDown, DollarSign, Percent, Calendar } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Percent, Calendar, Package } from 'lucide-react'
 import { ExpenseChart } from '@/components/expense-chart'
 import { SalesChart } from '@/components/sales-chart'
 
 async function getDashboardData(userId: string) {
   const supabase = await createClient()
   
-  // 1. SET RENTANG WAKTU
   const now = new Date()
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString()
 
-  // 2. FETCH EXPENSES (Sama dengan Laporan)
+  // 1. FETCH EXPENSES
   const { data: rawExpenses } = await supabase
     .from('expenses')
     .select('amount, expense_categories(name)')
@@ -20,14 +19,13 @@ async function getDashboardData(userId: string) {
     .gte('date', startOfMonth)
     .lte('date', endOfMonth)
 
-  // Filter: Abaikan 'Invoice Belanja' karena masuk ke HPP di tabel Sales
   const operationalExpenses = rawExpenses?.filter(e => 
     (e.expense_categories as any)?.name !== 'Invoice Belanja'
   ) || []
 
   const totalExpenses = operationalExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
 
-  // 3. FETCH SALES DENGAN ITEM (Sama dengan Laporan)
+  // 2. FETCH SALES & TOP PRODUCTS
   const { data: sales } = await supabase
     .from('sales')
     .select(`
@@ -36,27 +34,39 @@ async function getDashboardData(userId: string) {
       sale_date,
       sale_items (
         quantity,
-        unit_cost
+        unit_cost,
+        products (name)
       )
     `)
     .eq('user_id', userId)
     .gte('sale_date', startOfMonth)
     .lte('sale_date', endOfMonth)
 
+  // Hitung Totals
   const totalSales = sales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0
-  
-  // HPP Kemas (dari item)
   const totalPackagingCost = sales?.reduce((sum, s) => {
     const items = (s.sale_items as any[]) || []
     return sum + items.reduce((itemSum, item) => itemSum + (item.quantity * Number(item.unit_cost)), 0)
   }, 0) || 0
-  
-  // HPP Bahan (dari additional_cost)
   const totalInvoiceCost = sales?.reduce((sum, s) => sum + Number(s.additional_cost || 0), 0) || 0
 
-  // PROFIT BERSIH = Sales - HPP - Operasional
   const totalProfit = totalSales - totalPackagingCost - totalInvoiceCost - totalExpenses
   const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
+
+  // 3. LOGIKA TOP PRODUK
+  const productMap: Record<string, { name: string; quantity: number; revenue: number }> = {}
+  sales?.forEach(sale => {
+    const items = (sale.sale_items as any[]) || []
+    items.forEach(item => {
+      const name = item.products?.name || 'Produk Terhapus'
+      if (!productMap[name]) productMap[name] = { name, quantity: 0, revenue: 0 }
+      productMap[name].quantity += item.quantity
+      // Estimasi revenue per produk (proporsional atau jika ada unit_price di sale_items lebih akurat)
+    })
+  })
+  const topProducts = Object.values(productMap)
+    .sort((a, b) => b.quantity - a.quantity)
+    .slice(0, 5)
 
   // 4. DATA CHART PENGELUARAN
   const categoryTotals: Record<string, number> = {}
@@ -69,7 +79,7 @@ async function getDashboardData(userId: string) {
     amount,
   }))
 
-  // 5. TREND 90 HARI (Logika agar garis muncul)
+  // 5. TREND 90 HARI (Dioptimalkan untuk Area Chart)
   const last90Days = new Date()
   last90Days.setDate(last90Days.getDate() - 90)
   
@@ -85,13 +95,10 @@ async function getDashboardData(userId: string) {
     .gte('sale_date', last90Days.toISOString())
     .order('sale_date', { ascending: true })
 
-  // Akumulasi data per tanggal mentah (YYYY-MM-DD)
   const salesByDate: Record<string, { sales: number; profit: number }> = {}
   recentSales?.forEach((s) => {
     const dateKey = s.sale_date 
-    if (!salesByDate[dateKey]) {
-      salesByDate[dateKey] = { sales: 0, profit: 0 }
-    }
+    if (!salesByDate[dateKey]) salesByDate[dateKey] = { sales: 0, profit: 0 }
     
     const items = (s.sale_items as any[]) || []
     const salePackagingCost = items.reduce((sum, item) => sum + (item.quantity * Number(item.unit_cost)), 0)
@@ -100,12 +107,11 @@ async function getDashboardData(userId: string) {
     salesByDate[dateKey].profit += Number(s.total_amount) - salePackagingCost - Number(s.additional_cost || 0)
   })
 
-  // Format ke Array dan urutkan berdasarkan waktu
   const salesChartData = Object.entries(salesByDate)
     .map(([date, values]) => ({
       date: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-      sales: values.sales,
-      profit: values.profit,
+      pemasukan: values.sales, // Key disesuaikan dengan referensi gambar (Pemasukan)
+      profit: values.profit,    // Key disesuaikan
       rawDate: date
     }))
     .sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime())
@@ -118,6 +124,7 @@ async function getDashboardData(userId: string) {
     profitMargin,
     expenseChartData,
     salesChartData,
+    topProducts
   }
 }
 
@@ -146,35 +153,33 @@ export default async function DashboardPage() {
         </p>
       </div>
 
+      {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        {/* Omzet */}
         <Card className="border-l-4 border-l-blue-500 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Omzet Bulan Ini</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Omzet Bulan Ini</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(data.totalSales)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Total pendapatan kotor</p>
+            <p className="text-[10px] text-muted-foreground mt-1 text-blue-600 font-medium">Total pendapatan kotor</p>
           </CardContent>
         </Card>
 
-        {/* Biaya & HPP */}
         <Card className="border-l-4 border-l-orange-500 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Biaya & HPP</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Biaya & HPP</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(data.totalExpenses + data.totalHpp)}</div>
-            <p className="text-[10px] text-orange-600 font-medium mt-1 uppercase">
+            <p className="text-[10px] text-orange-600 font-medium mt-1">
               HPP: {formatCurrency(data.totalHpp)} | Ops: {formatCurrency(data.totalExpenses)}
             </p>
           </CardContent>
         </Card>
 
-        {/* Profit Bersih */}
         <Card className="border-l-4 border-l-green-500 shadow-sm bg-green-50/20">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Profit Bersih</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Profit Bersih</CardTitle>
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${data.totalProfit >= 0 ? "text-green-700" : "text-destructive"}`}>
@@ -184,10 +189,9 @@ export default async function DashboardPage() {
           </CardContent>
         </Card>
 
-        {/* Margin */}
         <Card className="border-l-4 border-l-slate-400 shadow-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wider">Margin</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Margin</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{data.profitMargin.toFixed(1)}%</div>
@@ -196,23 +200,26 @@ export default async function DashboardPage() {
         </Card>
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-7">
-        <Card className="lg:col-span-4 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" /> Tren Penjualan & Profit (90 Hari)
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="h-[350px]">
-            {data.salesChartData.length > 0 ? (
-              <SalesChart data={data.salesChartData} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-muted-foreground text-sm">Belum ada data penjualan</div>
-            )}
-          </CardContent>
-        </Card>
+      {/* Main Chart: Tren Penjualan & Profit */}
+      <Card className="shadow-sm">
+        <CardHeader>
+          <CardTitle className="text-base font-semibold flex items-center gap-2">
+            <TrendingUp className="h-4 w-4 text-blue-500" /> Tren Penjualan & Profit (90 Hari)
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="h-[400px]">
+          {data.salesChartData.length > 0 ? (
+            <SalesChart data={data.salesChartData} />
+          ) : (
+            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">Belum ada data penjualan</div>
+          )}
+        </CardContent>
+      </Card>
 
-        <Card className="lg:col-span-3 shadow-sm">
+      {/* Grid: Distribusi Biaya & Top Produk */}
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* Distribusi Biaya */}
+        <Card className="shadow-sm">
           <CardHeader>
             <CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle>
           </CardHeader>
@@ -220,8 +227,44 @@ export default async function DashboardPage() {
              {data.expenseChartData.length > 0 ? (
               <ExpenseChart data={data.expenseChartData} />
             ) : (
-              <div className="flex h-full items-center justify-center text-muted-foreground text-sm">Belum ada data pengeluaran</div>
+              <div className="flex h-full items-center justify-center text-muted-foreground text-sm font-light">Belum ada data pengeluaran operasional</div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Top Produk */}
+        <Card className="shadow-sm">
+          <CardHeader>
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <Package className="h-4 w-4 text-orange-500" /> Top Produk Terlaris
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {data.topProducts.length > 0 ? (
+                data.topProducts.map((product, index) => (
+                  <div key={index} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
+                        {index + 1}
+                      </div>
+                      <div>
+                        <p className="text-sm font-medium text-slate-900">{product.name}</p>
+                        <p className="text-xs text-muted-foreground">Bulan ini</p>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-slate-900">{product.quantity} unit</p>
+                      <p className="text-[10px] text-green-600 font-medium">Terlaris</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="flex h-64 items-center justify-center text-muted-foreground text-sm font-light">
+                  Belum ada data penjualan produk
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
