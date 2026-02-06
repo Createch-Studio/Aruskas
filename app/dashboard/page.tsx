@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { TrendingUp, TrendingDown, DollarSign, Percent, Calendar } from 'lucide-react'
+import { TrendingUp, TrendingDown, DollarSign, Percent, Calendar, Info } from 'lucide-react'
 import { ExpenseChart } from '@/components/expense-chart'
 import { SalesChart } from '@/components/sales-chart'
 
@@ -12,7 +12,7 @@ async function getDashboardData(userId: string) {
   const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
   const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59).toISOString()
 
-  // 1. Ambil Pengeluaran Bulan Ini
+  // 1. FETCH EXPENSES (Sama dengan Laporan)
   const { data: rawExpenses } = await supabase
     .from('expenses')
     .select('amount, expense_categories(name)')
@@ -20,84 +20,90 @@ async function getDashboardData(userId: string) {
     .gte('date', startOfMonth)
     .lte('date', endOfMonth)
 
-  // Filter: Hanya biaya operasional (Bukan Invoice Belanja)
-  const operationalExpensesData = rawExpenses?.filter(e => 
+  const operationalExpenses = rawExpenses?.filter(e => 
     (e.expense_categories as any)?.name !== 'Invoice Belanja'
   ) || []
 
-  const totalOperationalExpenses = operationalExpensesData.reduce((sum, e) => sum + Number(e.amount), 0)
+  const totalExpenses = operationalExpenses.reduce((sum, e) => sum + Number(e.amount), 0)
 
-  // 2. Ambil Penjualan Bulan Ini
+  // 2. FETCH SALES DENGAN ITEM (Sama dengan Laporan)
   const { data: sales } = await supabase
     .from('sales')
-    .select('total_amount, total_cost, additional_cost')
+    .select(`
+      total_amount,
+      additional_cost,
+      sale_date,
+      sale_items (
+        quantity,
+        unit_cost
+      )
+    `)
     .eq('user_id', userId)
     .gte('sale_date', startOfMonth)
     .lte('sale_date', endOfMonth)
 
+  // Hitung Omzet
   const totalSales = sales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0
   
-  // HPP = Modal Barang + Biaya Tambahan Penjualan
-  const totalHpp = sales?.reduce((sum, s) => 
-    sum + Number(s.total_cost || 0) + Number(s.additional_cost || 0), 0
-  ) || 0
+  // Hitung HPP Kemas (Unit Cost * Qty)
+  const totalPackagingCost = sales?.reduce((sum, s) => {
+    const items = (s.sale_items as any[]) || []
+    return sum + items.reduce((itemSum, item) => itemSum + (item.quantity * Number(item.unit_cost)), 0)
+  }, 0) || 0
+  
+  // Hitung HPP Bahan (Additional Cost/Invoice Belanja)
+  const totalInvoiceCost = sales?.reduce((sum, s) => sum + Number(s.additional_cost || 0), 0) || 0
 
-  // Profit Bersih = Omzet - HPP - Biaya Operasional (Listrik, Gaji, dll)
-  const totalProfit = totalSales - totalHpp - totalOperationalExpenses
+  // PROFIT BERSIH = Sales - HPP Kemas - HPP Bahan - Operasional
+  const totalProfit = totalSales - totalPackagingCost - totalInvoiceCost - totalExpenses
   const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
 
-  // 3. Persiapan Data Chart Pengeluaran (Kategori)
+  // 3. DATA CHART PENGELUARAN
   const categoryTotals: Record<string, number> = {}
-  operationalExpensesData.forEach((e) => {
+  operationalExpenses.forEach((e) => {
     const categoryName = (e.expense_categories as any)?.name || 'Lainnya'
     categoryTotals[categoryName] = (categoryTotals[categoryName] || 0) + Number(e.amount)
   })
-
   const expenseChartData = Object.entries(categoryTotals).map(([category, amount]) => ({
     category,
     amount,
   }))
 
-  // 4. Trend 90 Hari Terakhir
+  // 4. TREND 90 HARI (Logika Profit disamakan)
   const last90Days = new Date()
   last90Days.setDate(last90Days.getDate() - 90)
   
   const { data: recentSales } = await supabase
     .from('sales')
-    .select('sale_date, total_amount, total_cost, additional_cost')
+    .select(`
+      sale_date, 
+      total_amount, 
+      additional_cost,
+      sale_items (quantity, unit_cost)
+    `)
     .eq('user_id', userId)
     .gte('sale_date', last90Days.toISOString())
     .order('sale_date', { ascending: true })
 
   const salesByDate: Record<string, { sales: number; profit: number }> = {}
   recentSales?.forEach((s) => {
-    const date = new Date(s.sale_date).toLocaleDateString('id-ID', { 
-      day: 'numeric', 
-      month: 'short' 
-    })
-    if (!salesByDate[date]) {
-      salesByDate[date] = { sales: 0, profit: 0 }
-    }
-    const saleHpp = Number(s.total_cost || 0) + Number(s.additional_cost || 0)
+    const date = new Date(s.sale_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' })
+    if (!salesByDate[date]) salesByDate[date] = { sales: 0, profit: 0 }
+    
+    const salePackagingCost = (s.sale_items as any[])?.reduce((sum, item) => sum + (item.quantity * Number(item.unit_cost)), 0) || 0
+    
     salesByDate[date].sales += Number(s.total_amount)
-    // Profit per hari di chart ini bersifat "Profit Kotor" (Belum dikurangi operasional bulanan)
-    salesByDate[date].profit += Number(s.total_amount) - saleHpp
+    salesByDate[date].profit += Number(s.total_amount) - salePackagingCost - Number(s.additional_cost || 0)
   })
 
-  const salesChartData = Object.entries(salesByDate).map(([date, data]) => ({
-    date,
-    sales: data.sales,
-    profit: data.profit,
-  }))
-
   return {
-    totalExpenses: totalOperationalExpenses,
     totalSales,
-    totalHpp,
+    totalExpenses,
+    totalHpp: totalPackagingCost + totalInvoiceCost,
     totalProfit,
     profitMargin,
     expenseChartData,
-    salesChartData,
+    salesChartData: Object.entries(salesByDate).map(([date, data]) => ({ date, ...data })),
   }
 }
 
@@ -110,107 +116,67 @@ function formatCurrency(amount: number) {
   }).format(amount)
 }
 
-function cn(...classes: (string | boolean | undefined)[]) {
-  return classes.filter(Boolean).join(' ')
-}
-
 export default async function DashboardPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-
   if (!user) return null
+  
   const data = await getDashboardData(user.id)
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-1">
-        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
         <p className="text-muted-foreground flex items-center gap-2">
-          <Calendar className="h-4 w-4" /> Performa Bisnis & Tren 90 Hari
+          <Calendar className="h-4 w-4" /> Monitoring Performa Bisnis (Sinkron dengan Laporan)
         </p>
       </div>
 
-      {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="border-l-4 border-l-blue-500 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Omzet Bulan Ini</CardTitle>
-            <DollarSign className="h-4 w-4 text-blue-500" />
-          </CardHeader>
+        <Card className="border-l-4 border-l-blue-500">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Omzet Bulan Ini</CardTitle></CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{formatCurrency(data.totalSales)}</div>
-            <p className="text-xs text-muted-foreground mt-1">Total pendapatan masuk</p>
+            <p className="text-[10px] text-muted-foreground mt-1">Total pendapatan kotor</p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-orange-500 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Biaya Operasional</CardTitle>
-            <TrendingDown className="h-4 w-4 text-orange-500" />
-          </CardHeader>
+        <Card className="border-l-4 border-l-orange-500">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Biaya & HPP</CardTitle></CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(data.totalExpenses)}</div>
-            <p className="text-xs text-orange-600 font-medium mt-1">HPP Terjual: {formatCurrency(data.totalHpp)}</p>
+            <div className="text-2xl font-bold">{formatCurrency(data.totalExpenses + data.totalHpp)}</div>
+            <p className="text-[10px] text-orange-600 font-medium mt-1">HPP: {formatCurrency(data.totalHpp)} | Ops: {formatCurrency(data.totalExpenses)}</p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-green-500 shadow-sm bg-green-50/30">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-green-800">Profit Bersih</CardTitle>
-            <TrendingUp className="h-4 w-4 text-green-600" />
-          </CardHeader>
+        <Card className="border-l-4 border-l-green-500 bg-green-50/30">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-green-800">Profit Bersih</CardTitle></CardHeader>
           <CardContent>
-            <div className={cn(
-              "text-2xl font-bold",
-              data.totalProfit >= 0 ? "text-green-700" : "text-destructive"
-            )}>
+            <div className={`text-2xl font-bold ${data.totalProfit >= 0 ? "text-green-700" : "text-destructive"}`}>
               {formatCurrency(data.totalProfit)}
             </div>
-            <p className="text-xs text-muted-foreground mt-1 italic">Sudah dikurangi modal & operasional</p>
+            <p className="text-[10px] text-muted-foreground mt-1 italic">Sudah dikurangi semua biaya</p>
           </CardContent>
         </Card>
 
-        <Card className="border-l-4 border-l-slate-400 shadow-sm">
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Profit Margin</CardTitle>
-            <Percent className="h-4 w-4 text-slate-500" />
-          </CardHeader>
+        <Card className="border-l-4 border-l-slate-400">
+          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Margin</CardTitle></CardHeader>
           <CardContent>
-            <div className={cn(
-              "text-2xl font-bold",
-              data.profitMargin >= 0 ? "text-slate-800" : "text-destructive"
-            )}>
-              {data.profitMargin.toFixed(1)}%
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Efisiensi keuntungan</p>
+            <div className="text-2xl font-bold">{data.profitMargin.toFixed(1)}%</div>
+            <p className="text-[10px] text-muted-foreground mt-1 text-right">Efficiency</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Charts Section */}
       <div className="grid gap-4 lg:grid-cols-7">
         <Card className="lg:col-span-4 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" /> Grafik Penjualan & Profit
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px]">
-              <SalesChart data={data.salesChartData} />
-            </div>
-          </CardContent>
+          <CardHeader><CardTitle className="text-base font-semibold">Tren Penjualan & Profit (90 Hari)</CardTitle></CardHeader>
+          <CardContent className="h-[300px]"><SalesChart data={data.salesChartData} /></CardContent>
         </Card>
 
         <Card className="lg:col-span-3 shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-[300px]">
-              <ExpenseChart data={data.expenseChartData} />
-            </div>
-          </CardContent>
+          <CardHeader><CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle></CardHeader>
+          <CardContent className="h-[300px]"><ExpenseChart data={data.expenseChartData} /></CardContent>
         </Card>
       </div>
     </div>
