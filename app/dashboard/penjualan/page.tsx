@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Calendar } from 'lucide-react'
+import { Calendar, Banknote, ShoppingBag, TrendingUp, Percent } from 'lucide-react'
 import { SaleTable } from '@/components/sale-table'
 import { AddSaleDialog } from '@/components/add-sale-dialog'
 import type { Sale, Product, Client, SaleItem, PurchaseInvoice, Order, OrderItem } from '@/lib/types'
@@ -37,7 +37,6 @@ function getDateRange(period: PeriodType, selectedDate?: string, selectedMonth?:
       end = new Date(year, 11, 31, 23, 59, 59)
       break
     }
-    case 'all':
     default:
       start = new Date(2000, 0, 1)
       end = new Date(2099, 11, 31)
@@ -55,11 +54,18 @@ export default function PenjualanPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Period filter states
   const [period, setPeriod] = useState<PeriodType>('monthly')
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0])
   const [selectedMonth, setSelectedMonth] = useState(`${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`)
   const [selectedYear, setSelectedYear] = useState(String(new Date().getFullYear()))
+
+  const formatCurrency = (amount: number) =>
+    new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(amount)
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -106,31 +112,31 @@ export default function PenjualanPage() {
     const mappedSales = (salesRes.data || []).map((sale) => ({
       ...sale,
       client: sale.clients,
-      items: (sale.sale_items || []).map((item: SaleItem & { products: Product }) => ({
+      items: (sale.sale_items || []).map((item: any) => ({
         ...item,
         product: item.products,
       })),
-    })) as Sale[]
+    }))
 
-    const mappedInvoices = (invoicesRes.data || []).map(inv => ({
+    const mappedInvoices = (invoicesRes.data || []).map((inv: any) => ({
       ...inv,
       client: inv.clients,
-    })) as PurchaseInvoice[]
+    }))
 
-    const mappedOrders = (ordersRes.data || []).map((order) => ({
+    const mappedOrders = (ordersRes.data || []).map((order: any) => ({
       ...order,
       client: order.clients,
-      items: (order.order_items || []).map((item: OrderItem & { products: Product }) => ({
+      items: (order.order_items || []).map((item: any) => ({
         ...item,
         product: item.products,
       })),
-    })) as Order[]
+    }))
 
-    setSales(mappedSales)
+    setSales(mappedSales as Sale[])
     setProducts((productsRes.data || []) as Product[])
     setClients((clientsRes.data || []) as Client[])
-    setInvoices(mappedInvoices)
-    setOrders(mappedOrders)
+    setInvoices(mappedInvoices as PurchaseInvoice[])
+    setOrders(mappedOrders as Order[])
     setLoading(false)
   }, [period, selectedDate, selectedMonth, selectedYear])
 
@@ -145,10 +151,10 @@ export default function PenjualanPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Penjualan</h1>
-          <p className="text-muted-foreground">Catat transaksi penjualan</p>
+          <p className="text-muted-foreground">Catat dan analisis performa keuntungan bisnis Anda.</p>
         </div>
         <AddSaleDialog 
           products={products} 
@@ -159,43 +165,43 @@ export default function PenjualanPage() {
         />
       </div>
 
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="border-l-4 border-l-primary">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Penjualan</CardTitle>
+            <Banknote className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(totalSales)}
-            </div>
+            <div className="text-2xl font-bold">{formatCurrency(totalSales)}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+        <Card className="border-l-4 border-l-orange-500">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium">Total Modal</CardTitle>
+            <ShoppingBag className="h-4 w-4 text-orange-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(totalCost)}
-            </div>
+            <div className="text-2xl font-bold text-orange-600">{formatCurrency(totalCost)}</div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Profit</CardTitle>
+        <Card className="border-l-4 border-l-green-500">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Profit Bersih</CardTitle>
+            <TrendingUp className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
             <div className={`text-2xl font-bold ${totalProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              {new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(totalProfit)}
+              {formatCurrency(totalProfit)}
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Margin</CardTitle>
+        <Card className="border-l-4 border-l-blue-500">
+          <CardHeader className="flex flex-row items-center justify-between pb-2">
+            <CardTitle className="text-sm font-medium">Margin Profit</CardTitle>
+            <Percent className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${profitMargin >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <div className={`text-2xl font-bold ${profitMargin >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
               {profitMargin.toFixed(1)}%
             </div>
           </CardContent>
@@ -203,77 +209,64 @@ export default function PenjualanPage() {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Daftar Penjualan</CardTitle>
-          <CardDescription>Filter penjualan berdasarkan periode</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Tabs value={period} onValueChange={(val) => setPeriod(val as PeriodType)}>
-            <TabsList className="grid w-full grid-cols-4">
-              <TabsTrigger value="daily">Harian</TabsTrigger>
-              <TabsTrigger value="monthly">Bulanan</TabsTrigger>
-              <TabsTrigger value="yearly">Tahunan</TabsTrigger>
-              <TabsTrigger value="all">Semua</TabsTrigger>
-            </TabsList>
+        <CardHeader className="pb-3">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <Tabs value={period} onValueChange={(val) => setPeriod(val as PeriodType)} className="w-full md:w-auto">
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="daily">Harian</TabsTrigger>
+                <TabsTrigger value="monthly">Bulanan</TabsTrigger>
+                <TabsTrigger value="yearly">Tahunan</TabsTrigger>
+                <TabsTrigger value="all">Semua</TabsTrigger>
+              </TabsList>
+            </Tabs>
 
-            <TabsContent value={period} className="space-y-4">
+            <div className="flex items-center gap-2 bg-muted/50 p-1 rounded-md px-3 border">
+              <Calendar className="h-4 w-4 text-muted-foreground" />
               {period === 'daily' && (
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <Label htmlFor="sale-date" className="sr-only">Pilih Tanggal</Label>
-                  <Input
-                    id="sale-date"
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    className="w-auto"
-                  />
-                </div>
-              )}
-
-              {period === 'monthly' && (
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <Label htmlFor="sale-month" className="sr-only">Pilih Bulan</Label>
-                  <Input
-                    id="sale-month"
-                    type="month"
-                    value={selectedMonth}
-                    onChange={(e) => setSelectedMonth(e.target.value)}
-                    className="w-auto"
-                  />
-                </div>
-              )}
-
-              {period === 'yearly' && (
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4 text-muted-foreground" />
-                  <Label htmlFor="sale-year" className="sr-only">Pilih Tahun</Label>
-                  <Input
-                    id="sale-year"
-                    type="number"
-                    min="2000"
-                    max="2099"
-                    value={selectedYear}
-                    onChange={(e) => setSelectedYear(e.target.value)}
-                    className="w-auto"
-                  />
-                </div>
-              )}
-
-              {loading ? (
-                <div className="text-center py-8 text-muted-foreground">Memuat...</div>
-              ) : (
-                <SaleTable 
-                  sales={sales} 
-                  products={products} 
-                  clients={clients} 
-                  invoices={invoices}
-                  onRefresh={fetchData} 
+                <Input
+                  type="date"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                  className="border-none bg-transparent h-8 w-[150px] focus-visible:ring-0"
                 />
               )}
-            </TabsContent>
-          </Tabs>
+              {period === 'monthly' && (
+                <Input
+                  type="month"
+                  value={selectedMonth}
+                  onChange={(e) => setSelectedMonth(e.target.value)}
+                  className="border-none bg-transparent h-8 w-[150px] focus-visible:ring-0"
+                />
+              )}
+              {period === 'yearly' && (
+                <Input
+                  type="number"
+                  min="2000"
+                  max="2099"
+                  value={selectedYear}
+                  onChange={(e) => setSelectedYear(e.target.value)}
+                  className="border-none bg-transparent h-8 w-[80px] focus-visible:ring-0"
+                />
+              )}
+              {period === 'all' && <span className="text-sm font-medium px-2">Data Historis</span>}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex flex-col items-center justify-center py-20 text-muted-foreground space-y-4">
+               <div className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+               <p className="animate-pulse">Menghitung keuntungan...</p>
+            </div>
+          ) : (
+            <SaleTable 
+              sales={sales} 
+              products={products} 
+              clients={clients} 
+              invoices={invoices}
+              onRefresh={fetchData} 
+            />
+          )}
         </CardContent>
       </Card>
     </div>
