@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { TrendingUp, TrendingDown, DollarSign, Percent, Calendar, Package } from 'lucide-react'
+import { TrendingUp, Calendar, Package } from 'lucide-react'
 import { ExpenseChart } from '@/components/expense-chart'
 import { SalesChart } from '@/components/sales-chart'
 
@@ -42,7 +42,6 @@ async function getDashboardData(userId: string) {
     .gte('sale_date', startOfMonth)
     .lte('sale_date', endOfMonth)
 
-  // Hitung Totals
   const totalSales = sales?.reduce((sum, s) => sum + Number(s.total_amount), 0) || 0
   const totalPackagingCost = sales?.reduce((sum, s) => {
     const items = (s.sale_items as any[]) || []
@@ -54,14 +53,13 @@ async function getDashboardData(userId: string) {
   const profitMargin = totalSales > 0 ? (totalProfit / totalSales) * 100 : 0
 
   // 3. LOGIKA TOP PRODUK
-  const productMap: Record<string, { name: string; quantity: number; revenue: number }> = {}
+  const productMap: Record<string, { name: string; quantity: number }> = {}
   sales?.forEach(sale => {
     const items = (sale.sale_items as any[]) || []
     items.forEach(item => {
       const name = item.products?.name || 'Produk Terhapus'
-      if (!productMap[name]) productMap[name] = { name, quantity: 0, revenue: 0 }
+      if (!productMap[name]) productMap[name] = { name, quantity: 0 }
       productMap[name].quantity += item.quantity
-      // Estimasi revenue per produk (proporsional atau jika ada unit_price di sale_items lebih akurat)
     })
   })
   const topProducts = Object.values(productMap)
@@ -79,7 +77,7 @@ async function getDashboardData(userId: string) {
     amount,
   }))
 
-  // 5. TREND 90 HARI (Dioptimalkan untuk Area Chart)
+  // 5. TREND 90 HARI (Sinkronisasi Key: penjualan & profit)
   const last90Days = new Date()
   last90Days.setDate(last90Days.getDate() - 90)
   
@@ -110,30 +108,21 @@ async function getDashboardData(userId: string) {
   const salesChartData = Object.entries(salesByDate)
     .map(([date, values]) => ({
       date: new Date(date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short' }),
-      pemasukan: values.sales, // Key disesuaikan dengan referensi gambar (Pemasukan)
-      profit: values.profit,    // Key disesuaikan
+      penjualan: values.sales, // Key diubah ke 'penjualan'
+      profit: values.profit,    
       rawDate: date
     }))
     .sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime())
 
   return {
-    totalSales,
-    totalExpenses,
-    totalHpp: totalPackagingCost + totalInvoiceCost,
-    totalProfit,
-    profitMargin,
-    expenseChartData,
-    salesChartData,
-    topProducts
+    totalSales, totalExpenses, totalHpp: totalPackagingCost + totalInvoiceCost,
+    totalProfit, profitMargin, expenseChartData, salesChartData, topProducts
   }
 }
 
 function formatCurrency(amount: number) {
   return new Intl.NumberFormat('id-ID', {
-    style: 'currency',
-    currency: 'IDR',
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    style: 'currency', currency: 'IDR', minimumFractionDigits: 0, maximumFractionDigits: 0,
   }).format(amount)
 }
 
@@ -145,95 +134,48 @@ export default async function DashboardPage() {
   const data = await getDashboardData(user.id)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-4">
       <div className="flex flex-col gap-1">
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Calendar className="h-4 w-4" /> Monitoring Performa Bisnis (Sinkron dengan Laporan)
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Dashboard</h1>
+        <p className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+          <Calendar className="h-4 w-4" /> Monitoring Performa Bisnis
         </p>
       </div>
 
       {/* Summary Cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="border-l-4 border-l-blue-500 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Omzet Bulan Ini</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(data.totalSales)}</div>
-            <p className="text-[10px] text-muted-foreground mt-1 text-blue-600 font-medium">Total pendapatan kotor</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-orange-500 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Biaya & HPP</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(data.totalExpenses + data.totalHpp)}</div>
-            <p className="text-[10px] text-orange-600 font-medium mt-1">
-              HPP: {formatCurrency(data.totalHpp)} | Ops: {formatCurrency(data.totalExpenses)}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-green-500 shadow-sm bg-green-50/20">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Profit Bersih</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className={`text-2xl font-bold ${data.totalProfit >= 0 ? "text-green-700" : "text-destructive"}`}>
-              {formatCurrency(data.totalProfit)}
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-1 italic">Sudah dikurangi semua biaya</p>
-          </CardContent>
-        </Card>
-
-        <Card className="border-l-4 border-l-slate-400 shadow-sm">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground uppercase">Margin</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{data.profitMargin.toFixed(1)}%</div>
-            <p className="text-[10px] text-muted-foreground mt-1">Efficiency Level</p>
-          </CardContent>
-        </Card>
+        <SummaryCard title="Omzet Bulan Ini" value={data.totalSales} subtitle="Total pendapatan kotor" color="blue" />
+        <SummaryCard title="Biaya & HPP" value={data.totalExpenses + data.totalHpp} subtitle={`HPP: ${formatCurrency(data.totalHpp)} | Ops: ${formatCurrency(data.totalExpenses)}`} color="orange" />
+        <SummaryCard title="Profit Bersih" value={data.totalProfit} subtitle="Sudah dikurangi semua biaya" color="green" isProfit />
+        <SummaryCard title="Margin" value={`${data.profitMargin.toFixed(1)}%`} subtitle="Efficiency Level" color="slate" isRaw />
       </div>
 
       {/* Main Chart: Tren Penjualan & Profit */}
-      <Card className="shadow-sm">
-        <CardHeader>
+      <Card className="shadow-sm border-slate-200">
+        <CardHeader className="flex flex-row items-center justify-between pb-8">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
             <TrendingUp className="h-4 w-4 text-blue-500" /> Tren Penjualan & Profit (90 Hari)
           </CardTitle>
         </CardHeader>
-        <CardContent className="h-[400px]">
+        <CardContent className="h-[350px]">
           {data.salesChartData.length > 0 ? (
             <SalesChart data={data.salesChartData} />
           ) : (
-            <div className="flex h-full items-center justify-center text-muted-foreground text-sm">Belum ada data penjualan</div>
+            <div className="flex h-full items-center justify-center text-muted-foreground text-sm italic">Belum ada data penjualan</div>
           )}
         </CardContent>
       </Card>
 
-      {/* Grid: Distribusi Biaya & Top Produk */}
+      {/* Bottom Grid: Expenses & Products */}
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* Distribusi Biaya */}
-        <Card className="shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle>
-          </CardHeader>
+        <Card className="shadow-sm border-slate-200">
+          <CardHeader><CardTitle className="text-base font-semibold">Distribusi Biaya Operasional</CardTitle></CardHeader>
           <CardContent className="h-[350px]">
-             {data.expenseChartData.length > 0 ? (
-              <ExpenseChart data={data.expenseChartData} />
-            ) : (
-              <div className="flex h-full items-center justify-center text-muted-foreground text-sm font-light">Belum ada data pengeluaran operasional</div>
-            )}
+             {data.expenseChartData.length > 0 ? <ExpenseChart data={data.expenseChartData} /> : <NoData />}
           </CardContent>
         </Card>
 
-        {/* Top Produk */}
-        <Card className="shadow-sm">
+        <Card className="shadow-sm border-slate-200">
           <CardHeader>
             <CardTitle className="text-base font-semibold flex items-center gap-2">
               <Package className="h-4 w-4 text-orange-500" /> Top Produk Terlaris
@@ -241,29 +183,15 @@ export default async function DashboardPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {data.topProducts.length > 0 ? (
-                data.topProducts.map((product, index) => (
-                  <div key={index} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">
-                        {index + 1}
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-slate-900">{product.name}</p>
-                        <p className="text-xs text-muted-foreground">Bulan ini</p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-sm font-bold text-slate-900">{product.quantity} unit</p>
-                      <p className="text-[10px] text-green-600 font-medium">Terlaris</p>
-                    </div>
+              {data.topProducts.length > 0 ? data.topProducts.map((p, i) => (
+                <div key={i} className="flex items-center justify-between border-b border-slate-50 pb-3 last:border-0">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600">{i + 1}</div>
+                    <p className="text-sm font-medium text-slate-900">{p.name}</p>
                   </div>
-                ))
-              ) : (
-                <div className="flex h-64 items-center justify-center text-muted-foreground text-sm font-light">
-                  Belum ada data penjualan produk
+                  <p className="text-sm font-bold text-slate-900">{p.quantity} unit</p>
                 </div>
-              )}
+              )) : <NoData />}
             </div>
           </CardContent>
         </Card>
@@ -271,3 +199,18 @@ export default async function DashboardPage() {
     </div>
   )
 }
+
+function SummaryCard({ title, value, subtitle, color, isProfit, isRaw }: any) {
+  const colorMap: any = { blue: 'border-l-blue-500', orange: 'border-l-orange-500', green: 'border-l-green-500', slate: 'border-l-slate-400' }
+  return (
+    <Card className={`border-l-4 ${colorMap[color]} shadow-sm`}>
+      <CardHeader className="pb-2"><CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-tight">{title}</CardTitle></CardHeader>
+      <CardContent>
+        <div className={`text-2xl font-bold ${isProfit && value < 0 ? 'text-destructive' : ''}`}>{isRaw ? value : formatCurrency(value)}</div>
+        <p className="text-[10px] text-muted-foreground mt-1">{subtitle}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function NoData() { return <div className="flex h-full items-center justify-center text-muted-foreground text-sm italic">Belum ada data</div> }
