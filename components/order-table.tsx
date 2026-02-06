@@ -42,10 +42,10 @@ interface OrderTableProps {
 }
 
 const statusColors = {
-  pending: 'bg-yellow-500',
-  processing: 'bg-blue-500',
-  completed: 'bg-green-500',
-  cancelled: 'bg-red-500',
+  pending: 'bg-yellow-500 hover:bg-yellow-600',
+  processing: 'bg-blue-500 hover:bg-blue-600',
+  completed: 'bg-green-500 hover:bg-green-600',
+  cancelled: 'bg-red-500 hover:bg-red-600',
 }
 
 const statusLabels = {
@@ -68,15 +68,21 @@ export function OrderTable({ orders, clients, products, onRefresh }: OrderTableP
     router.refresh()
   }
 
+  // Format mata uang tanpa desimal ,00
   const formatCurrency = (amount: number) =>
-    new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(amount)
+    new Intl.NumberFormat('id-ID', { 
+        style: 'currency', 
+        currency: 'IDR',
+        minimumFractionDigits: 0,
+        maximumFractionDigits: 0 
+    }).format(amount)
 
   const formatDate = (dateString: string) =>
     new Date(dateString).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })
 
   return (
     <>
-      <div className="rounded-md border">
+      <div className="rounded-md border overflow-x-auto">
         <Table>
           <TableHeader>
             <TableRow>
@@ -92,8 +98,8 @@ export function OrderTable({ orders, clients, products, onRefresh }: OrderTableP
           <TableBody>
             {orders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
-                  Belum ada order
+                <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
+                  Belum ada data order
                 </TableCell>
               </TableRow>
             ) : (
@@ -102,12 +108,16 @@ export function OrderTable({ orders, clients, products, onRefresh }: OrderTableP
                   <TableCell className="font-medium">{order.order_number}</TableCell>
                   <TableCell>{formatDate(order.order_date)}</TableCell>
                   <TableCell>{order.client?.name || '-'}</TableCell>
-                  <TableCell>{order.items?.length || 0} item</TableCell>
+                  <TableCell>
+                    <Badge variant="secondary" className="font-normal">
+                        {order.items?.length || 0} item
+                    </Badge>
+                  </TableCell>
                   <TableCell className="text-right font-medium">
                     {formatCurrency(order.total_amount)}
                   </TableCell>
                   <TableCell>
-                    <Badge className={statusColors[order.status]}>
+                    <Badge className={`${statusColors[order.status]} text-white border-none`}>
                       {statusLabels[order.status]}
                     </Badge>
                   </TableCell>
@@ -115,29 +125,29 @@ export function OrderTable({ orders, clients, products, onRefresh }: OrderTableP
                     <div className="flex gap-1">
                       <Button variant="ghost" size="icon" onClick={() => setViewingOrder(order)}>
                         <Eye className="h-4 w-4" />
-                        <span className="sr-only">Lihat</span>
                       </Button>
                       <Button variant="ghost" size="icon" onClick={() => setEditingOrder(order)}>
                         <Pencil className="h-4 w-4" />
-                        <span className="sr-only">Edit</span>
                       </Button>
                       <AlertDialog>
                         <AlertDialogTrigger asChild>
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
                             <Trash2 className="h-4 w-4" />
-                            <span className="sr-only">Hapus</span>
                           </Button>
                         </AlertDialogTrigger>
                         <AlertDialogContent>
                           <AlertDialogHeader>
-                            <AlertDialogTitle>Hapus Order</AlertDialogTitle>
+                            <AlertDialogTitle>Hapus Order?</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Yakin ingin menghapus order ini? Tindakan ini tidak dapat dibatalkan.
+                              Tindakan ini akan menghapus data order dan item di dalamnya secara permanen.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Batal</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleDelete(order.id)}>
+                            <AlertDialogAction 
+                                onClick={() => handleDelete(order.id)}
+                                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                            >
                               Hapus
                             </AlertDialogAction>
                           </AlertDialogFooter>
@@ -152,87 +162,95 @@ export function OrderTable({ orders, clients, products, onRefresh }: OrderTableP
         </Table>
       </div>
 
+      {/* Detail Order Dialog dengan Scroll */}
       <Dialog open={!!viewingOrder} onOpenChange={(open) => !open && setViewingOrder(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl h-[85vh] flex flex-col p-0">
+          <DialogHeader className="p-6 border-b">
             <DialogTitle>Detail Order</DialogTitle>
           </DialogHeader>
+          
           {viewingOrder && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-muted-foreground">Nomor Order:</span>
-                  <div className="font-medium">{viewingOrder.order_number}</div>
+            <div className="flex-1 overflow-y-auto p-6 space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-6 text-sm">
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">Nomor Order</span>
+                  <div className="font-bold text-base">{viewingOrder.order_number}</div>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Status:</span>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">Status</span>
                   <div>
-                    <Badge className={statusColors[viewingOrder.status]}>
+                    <Badge className={`${statusColors[viewingOrder.status]} text-white border-none`}>
                       {statusLabels[viewingOrder.status]}
                     </Badge>
                   </div>
                 </div>
-                <div>
-                  <span className="text-muted-foreground">Tanggal Order:</span>
-                  <div className="font-medium">{formatDate(viewingOrder.order_date)}</div>
+                <div className="space-y-1">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider">Tanggal Order</span>
+                  <div className="font-semibold">{formatDate(viewingOrder.order_date)}</div>
                 </div>
                 {viewingOrder.delivery_date && (
-                  <div>
-                    <span className="text-muted-foreground">Tanggal Kirim:</span>
-                    <div className="font-medium">{formatDate(viewingOrder.delivery_date)}</div>
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wider">Tanggal Kirim</span>
+                    <div className="font-semibold">{formatDate(viewingOrder.delivery_date)}</div>
                   </div>
                 )}
-                {viewingOrder.client && (
-                  <div>
-                    <span className="text-muted-foreground">Client:</span>
-                    <div className="font-medium">{viewingOrder.client.name}</div>
-                  </div>
-                )}
-                {viewingOrder.description && (
-                  <div className="col-span-2">
-                    <span className="text-muted-foreground">Deskripsi:</span>
-                    <div className="font-medium">{viewingOrder.description}</div>
-                  </div>
-                )}
+                <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wider">Client</span>
+                    <div className="font-semibold">{viewingOrder.client?.name || 'Tanpa Client'}</div>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                <h4 className="font-semibold">Item Order:</h4>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead className="text-center">Qty</TableHead>
-                      <TableHead className="text-right">Harga</TableHead>
-                      <TableHead className="text-right">Subtotal</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {viewingOrder.items?.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell>{item.description}</TableCell>
-                        <TableCell className="text-center">{item.quantity}</TableCell>
-                        <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>
-                        <TableCell className="text-right">
-                          {formatCurrency(item.quantity * item.unit_price)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+              {viewingOrder.description && (
+                <div className="rounded-md bg-muted/50 p-3 border">
+                  <span className="text-xs text-muted-foreground uppercase tracking-wider block mb-1">Deskripsi</span>
+                  <p className="text-sm font-medium">{viewingOrder.description}</p>
+                </div>
+              )}
 
-              <div className="flex justify-between border-t pt-4 text-lg font-semibold">
-                <span>Total:</span>
-                <span>{formatCurrency(viewingOrder.total_amount)}</span>
+              <div className="space-y-3">
+                <h4 className="font-bold text-sm uppercase tracking-wider">Daftar Item:</h4>
+                <div className="rounded-md border overflow-hidden">
+                    <Table>
+                    <TableHeader className="bg-muted/50">
+                        <TableRow>
+                        <TableHead>Item</TableHead>
+                        <TableHead className="text-center w-[80px]">Qty</TableHead>
+                        <TableHead className="text-right">Harga</TableHead>
+                        <TableHead className="text-right">Subtotal</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {viewingOrder.items?.map((item) => (
+                        <TableRow key={item.id}>
+                            <TableCell className="font-medium">{item.description}</TableCell>
+                            <TableCell className="text-center">{item.quantity}</TableCell>
+                            <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>
+                            <TableCell className="text-right font-bold">
+                            {formatCurrency(item.quantity * item.unit_price)}
+                            </TableCell>
+                        </TableRow>
+                        ))}
+                    </TableBody>
+                    </Table>
+                </div>
               </div>
 
               {viewingOrder.notes && (
-                <div className="rounded-lg bg-muted p-3">
-                  <span className="text-sm text-muted-foreground">Catatan:</span>
-                  <p className="text-sm">{viewingOrder.notes}</p>
+                <div className="rounded-lg border border-dashed p-4">
+                  <span className="text-xs text-muted-foreground uppercase font-bold">Catatan Produksi:</span>
+                  <p className="text-sm mt-1 text-muted-foreground italic">"{viewingOrder.notes}"</p>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Sticky Total Footer */}
+          {viewingOrder && (
+            <div className="p-6 border-t bg-muted/20">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground font-medium">Total Tagihan</span>
+                <span className="text-2xl font-black text-primary">{formatCurrency(viewingOrder.total_amount)}</span>
+              </div>
             </div>
           )}
         </DialogContent>

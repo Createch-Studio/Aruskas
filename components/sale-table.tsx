@@ -87,7 +87,7 @@ export function SaleTable({ sales, products, clients, invoices, onRefresh }: Sal
       if (sale?.order_id) {
         await supabase
           .from('orders')
-          .update({ status: 'in_progress' })
+          .update({ status: 'proses' })
           .eq('id', sale.order_id)
       }
       
