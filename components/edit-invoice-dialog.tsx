@@ -100,56 +100,79 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
     if (!invoice) return
     
     setIsLoading(true)
-
     const supabase = createClient()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) return
 
     const validItems = items.filter(item => item.description.trim() && item.unitPrice > 0)
-
     if (validItems.length === 0) {
       setIsLoading(false)
       return
     }
 
     const totalAmount = calculateTotal()
+    const selectedClient = clients.find(c => c.id === clientId)
 
-    // Update invoice
-    const { error: invoiceError } = await supabase
-      .from('purchase_invoices')
-      .update({
-        client_id: clientId,
-        invoice_number: invoiceNumber,
-        description: description || null,
-        total_amount: totalAmount,
-        invoice_date: invoiceDate,
-        status: status,
-      })
-      .eq('id', invoice.id)
+    try {
+      // 1. Update purchase_invoices
+      const { error: invoiceError } = await supabase
+        .from('purchase_invoices')
+        .update({
+          client_id: clientId,
+          invoice_number: invoiceNumber,
+          description: description || null,
+          total_amount: totalAmount,
+          invoice_date: invoiceDate,
+          status: status,
+        })
+        .eq('id', invoice.id)
 
-    if (invoiceError) {
+      if (invoiceError) throw invoiceError
+
+      // 2. Refresh Items (Hapus yang lama, masukkan yang baru)
+      await supabase.from('purchase_invoice_items').delete().eq('purchase_invoice_id', invoice.id)
+      const invoiceItems = validItems.map((item) => ({
+        purchase_invoice_id: invoice.id,
+        description: item.description,
+        quantity: item.quantity,
+        unit_price: item.unitPrice,
+      }))
+      await supabase.from('purchase_invoice_items').insert(invoiceItems)
+
+      // 3. SINKRONISASI PENGELUARAN (EXPENSES)
+      // Kita cari expense yang memiliki deskripsi mengandung nomor invoice lama
+      const oldInvoiceRef = `Belanja ${invoice.invoice_number}`
+      
+      const { data: existingExpense } = await supabase
+        .from('expenses')
+        .select('id')
+        .eq('user_id', user.id)
+        .ilike('description', `%${oldInvoiceRef}%`)
+        .maybeSingle()
+
+      if (existingExpense) {
+        // Jika status cancelled, mungkin ingin menghapus expense atau tetap ada tapi 0? 
+        // Di sini kita update datanya sesuai perubahan invoice
+        await supabase
+          .from('expenses')
+          .update({
+            date: invoiceDate,
+            amount: status === 'cancelled' ? 0 : totalAmount,
+            client_id: clientId,
+            description: `Otomatis: Belanja ${invoiceNumber} (${selectedClient?.name || 'Client'})`,
+          })
+          .eq('id', existingExpense.id)
+      }
+
+      onOpenChange(false)
+      onSuccess()
+      router.refresh()
+    } catch (err) {
+      console.error("Update failed:", err)
+      alert("Gagal memperbarui data")
+    } finally {
       setIsLoading(false)
-      return
     }
-
-    // Delete existing items
-    await supabase
-      .from('purchase_invoice_items')
-      .delete()
-      .eq('purchase_invoice_id', invoice.id)
-
-    // Create new invoice items
-    const invoiceItems = validItems.map((item) => ({
-      purchase_invoice_id: invoice.id,
-      description: item.description,
-      quantity: item.quantity,
-      unit_price: item.unitPrice,
-    }))
-
-    await supabase.from('purchase_invoice_items').insert(invoiceItems)
-
-    setIsLoading(false)
-    onOpenChange(false)
-    onSuccess()
-    router.refresh()
   }
 
   return (
@@ -159,7 +182,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
           <DialogHeader>
             <DialogTitle>Edit Invoice Belanja</DialogTitle>
             <DialogDescription>
-              Ubah data invoice belanja bahan baku
+              Perubahan pada jumlah total akan otomatis memperbarui catatan pengeluaran.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -191,7 +214,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="grid gap-2">
                 <Label htmlFor="edit-invoice-date">Tanggal</Label>
                 <Input
@@ -204,7 +227,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-status">Status</Label>
-                <Select value={status} onValueChange={(value: 'pending' | 'used' | 'cancelled') => setStatus(value)}>
+                <Select value={status} onValueChange={(value: any) => setStatus(value)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
@@ -216,25 +239,25 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
                 </Select>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-description">Deskripsi</Label>
+                <Label htmlFor="edit-description">Catatan</Label>
                 <Input
                   id="edit-description"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  placeholder="Deskripsi invoice"
+                  placeholder="Keterangan..."
                 />
               </div>
             </div>
 
             <div className="space-y-3">
-              <Label>Item Belanja</Label>
+              <Label className="font-semibold">Item Belanja</Label>
               {items.map((item, index) => (
-                <div key={index} className="rounded-lg border p-3 space-y-2">
+                <div key={index} className="rounded-lg border bg-card p-3 space-y-3 shadow-sm">
                   <div className="flex gap-2">
                     <Input
                       value={item.description}
                       onChange={(e) => updateItem(index, 'description', e.target.value)}
-                      placeholder="Nama item/bahan"
+                      placeholder="Nama item"
                       className="flex-1"
                     />
                     {items.length > 1 && (
@@ -242,6 +265,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
                         type="button"
                         variant="ghost"
                         size="icon"
+                        className="text-destructive"
                         onClick={() => removeItem(index)}
                       >
                         <Trash2 className="h-4 w-4" />
@@ -250,48 +274,44 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
                   </div>
                   <div className="grid grid-cols-3 gap-2">
                     <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Qty</Label>
+                      <Label className="text-xs">Qty</Label>
                       <Input
                         type="number"
                         step="0.01"
-                        min="0"
                         value={item.quantity}
-                        onChange={(e) =>
-                        updateItem(index, 'quantity', parseFloat(e.target.value) || 0)
-                        }
+                        onChange={(e) => updateItem(index, 'quantity', parseFloat(e.target.value) || 0)}
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Harga Satuan</Label>
+                      <Label className="text-xs">Harga</Label>
                       <Input
                         type="number"
                         value={item.unitPrice}
                         onChange={(e) => updateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)}
-                        min="0"
                       />
                     </div>
                     <div className="space-y-1">
-                      <Label className="text-xs text-muted-foreground">Subtotal</Label>
-                      <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm">
+                      <Label className="text-xs">Subtotal</Label>
+                      <div className="flex h-10 items-center rounded-md border bg-muted/50 px-3 text-sm font-medium">
                         {formatCurrency(item.quantity * item.unitPrice)}
                       </div>
                     </div>
                   </div>
                 </div>
               ))}
-              <Button type="button" variant="outline" size="sm" onClick={addItem}>
+              <Button type="button" variant="outline" size="sm" className="w-full" onClick={addItem}>
                 <Plus className="mr-2 h-4 w-4" />
                 Tambah Item
               </Button>
             </div>
 
-            <div className="flex justify-between items-center p-4 bg-muted rounded-lg">
-              <span className="font-medium">Total Invoice</span>
-              <span className="text-lg font-bold">{formatCurrency(calculateTotal())}</span>
+            <div className="flex justify-between items-center p-4 bg-primary/5 border border-primary/20 rounded-lg">
+              <span className="font-medium text-primary">Total Invoice Baru</span>
+              <span className="text-xl font-bold text-primary">{formatCurrency(calculateTotal())}</span>
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
               Batal
             </Button>
             <Button type="submit" disabled={isLoading || !clientId || !invoiceNumber}>
