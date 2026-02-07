@@ -29,9 +29,11 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip"
-import { Pencil, Trash2, Info } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Pencil, Trash2, Info, Lock } from 'lucide-react'
 import { EditExpenseDialog } from '@/components/edit-expense-dialog'
 import type { Expense, ExpenseCategory, Client } from '@/lib/types'
+import { toast } from "sonner"
 
 interface ExpenseTableProps {
   expenses: Expense[]
@@ -40,16 +42,15 @@ interface ExpenseTableProps {
   onRefresh: () => void
 }
 
-function formatCurrency(amount: number) {
+const formatCurrency = (amount: number) => {
   return new Intl.NumberFormat('id-ID', {
     style: 'currency',
     currency: 'IDR',
     minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
   }).format(amount)
 }
 
-function formatDate(dateString: string) {
+const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleDateString('id-ID', {
     day: 'numeric',
     month: 'long',
@@ -59,112 +60,129 @@ function formatDate(dateString: string) {
 
 export function ExpenseTable({ expenses, categories, clients, onRefresh }: ExpenseTableProps) {
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
-  const [isDeleting, setIsDeleting] = useState(false)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const router = useRouter()
+  const supabase = createClient()
 
   const handleDelete = async (id: string) => {
-    setIsDeleting(true)
-    const supabase = createClient()
-    await supabase.from('expenses').delete().eq('id', id)
-    onRefresh()
-    router.refresh()
-    setIsDeleting(false)
+    setDeletingId(id)
+    try {
+      const { error } = await supabase.from('expenses').delete().eq('id', id)
+      if (error) throw error
+      
+      toast.success("Pengeluaran berhasil dihapus")
+      onRefresh()
+      router.refresh()
+    } catch (error: any) {
+      toast.error("Gagal menghapus: " + error.message)
+    } finally {
+      setDeletingId(null)
+    }
   }
 
   if (expenses.length === 0) {
     return (
-      <div className="flex h-32 items-center justify-center text-muted-foreground border rounded-lg border-dashed">
-        Belum ada data pengeluaran
+      <div className="flex h-32 items-center justify-center text-muted-foreground border-2 border-dashed rounded-xl bg-slate-50/50">
+        Belum ada data pengeluaran tercatat
       </div>
     )
   }
 
   return (
     <TooltipProvider>
-      <div className="rounded-md border">
+      <div className="rounded-xl border shadow-sm bg-white overflow-hidden">
         <Table>
-          <TableHeader className="bg-muted/50">
+          <TableHeader className="bg-slate-50">
             <TableRow>
-              <TableHead>Tanggal</TableHead>
-              <TableHead>Kategori</TableHead>
-              <TableHead>Client</TableHead>
-              <TableHead>Deskripsi</TableHead>
-              <TableHead className="text-right">Jumlah</TableHead>
-              <TableHead className="w-[100px] text-center">Aksi</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold tracking-wider">Tanggal</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold tracking-wider">Kategori</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold tracking-wider">Client / Unit</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold tracking-wider">Deskripsi</TableHead>
+              <TableHead className="text-[10px] uppercase font-bold tracking-wider text-right">Jumlah</TableHead>
+              <TableHead className="w-[100px] text-center text-[10px] uppercase font-bold tracking-wider">Aksi</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {expenses.map((expense) => {
-              // Cek apakah kategori adalah Invoice Belanja
-              const isInvoiceCategory = expense.category?.name === 'Invoice Belanja'
+              /**
+               * LOGIKA DETEKSI AUTOMATIS:
+               * 1. Cek apakah ada field 'purchase_invoice_id' (Cara paling akurat)
+               * 2. Cek apakah deskripsi mengandung kata "Otomatis: Belanja" (Cara fallback)
+               */
+              const isAutomatic = !!expense.purchase_invoice_id || expense.description?.includes("Otomatis: Belanja")
 
               return (
-                <TableRow key={expense.id} className={isInvoiceCategory ? "bg-slate-50/50" : ""}>
-                  <TableCell className="whitespace-nowrap">{formatDate(expense.date)}</TableCell>
-                  <TableCell>
-                    <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                      isInvoiceCategory ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-700"
-                    }`}>
-                      {expense.category?.name || '-'}
-                    </span>
+                <TableRow key={expense.id} className={isAutomatic ? "bg-blue-50/30" : ""}>
+                  <TableCell className="whitespace-nowrap text-xs">
+                    {formatDate(expense.date)}
                   </TableCell>
-                  <TableCell>{expense.client?.name || '-'}</TableCell>
-                  <TableCell className="max-w-[200px] truncate">{expense.description}</TableCell>
-                  <TableCell className="text-right font-semibold">
+                  <TableCell>
+                    <Badge 
+                      variant={isAutomatic ? "default" : "outline"} 
+                      className={isAutomatic ? "bg-blue-600 hover:bg-blue-600" : "text-slate-600"}
+                    >
+                      {expense.category?.name || 'Umum'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-xs font-medium">
+                    {expense.client?.name || '-'}
+                  </TableCell>
+                  <TableCell className="max-w-[250px] truncate text-xs text-muted-foreground">
+                    {expense.description}
+                  </TableCell>
+                  <TableCell className="text-right font-mono font-bold text-sm text-slate-900">
                     {formatCurrency(expense.amount)}
                   </TableCell>
                   <TableCell>
                     <div className="flex justify-center gap-1">
-                      {isInvoiceCategory ? (
-                        // Jika kategori Invoice Belanja, tampilkan tooltip informasi
+                      {isAutomatic ? (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <div className="flex gap-1 opacity-40 cursor-not-allowed">
-                              <Button variant="ghost" size="icon" disabled>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                              <Button variant="ghost" size="icon" disabled>
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
+                            <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-400 cursor-help">
+                              <Lock className="h-4 w-4" />
+                            </Button>
                           </TooltipTrigger>
-                          <TooltipContent side="left" className="max-w-[200px] text-center">
-                            Pengeluaran ini otomatis. Ubah atau hapus melalui menu <strong>Invoice Belanja</strong>.
+                          <TooltipContent side="left" className="bg-slate-900 text-white border-none p-3 shadow-xl">
+                            <p className="text-xs font-bold mb-1 flex items-center gap-2">
+                                <Info className="h-3 w-3" /> Data Terkunci
+                            </p>
+                            <p className="text-[10px] opacity-80">
+                                Ini adalah pengeluaran otomatis dari stok. <br />
+                                Edit melalui menu <strong>Invoice Belanja</strong>.
+                            </p>
                           </TooltipContent>
                         </Tooltip>
                       ) : (
-                        // Jika kategori biasa, tampilkan tombol normal
                         <>
                           <Button
                             variant="ghost"
                             size="icon"
+                            className="h-8 w-8 text-slate-500"
                             onClick={() => setEditingExpense(expense)}
                           >
                             <Pencil className="h-4 w-4" />
-                            <span className="sr-only">Edit</span>
                           </Button>
                           <AlertDialog>
                             <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive">
+                              <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive/10">
                                 <Trash2 className="h-4 w-4" />
-                                <span className="sr-only">Hapus</span>
                               </Button>
                             </AlertDialogTrigger>
                             <AlertDialogContent>
                               <AlertDialogHeader>
                                 <AlertDialogTitle>Hapus Pengeluaran?</AlertDialogTitle>
                                 <AlertDialogDescription>
-                                  Tindakan ini tidak dapat dibatalkan. Pengeluaran ini akan dihapus permanen.
+                                  Data ini akan dihapus permanen dari laporan keuangan.
                                 </AlertDialogDescription>
                               </AlertDialogHeader>
                               <AlertDialogFooter>
                                 <AlertDialogCancel>Batal</AlertDialogCancel>
                                 <AlertDialogAction
                                   onClick={() => handleDelete(expense.id)}
-                                  className="bg-destructive hover:bg-destructive/90"
-                                  disabled={isDeleting}
+                                  className="bg-destructive hover:bg-destructive/90 text-white"
+                                  disabled={deletingId === expense.id}
                                 >
-                                  {isDeleting ? "Menghapus..." : "Hapus"}
+                                  {deletingId === expense.id ? "Menghapus..." : "Hapus"}
                                 </AlertDialogAction>
                               </AlertDialogFooter>
                             </AlertDialogContent>
