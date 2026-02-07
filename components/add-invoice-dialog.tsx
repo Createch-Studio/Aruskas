@@ -22,6 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+// PERBAIKAN 1: Impor Badge yang sebelumnya menyebabkan eror
+import { Badge } from '@/components/ui/badge' 
 import { Plus, Trash2, Package, Keyboard, Loader2, AlertCircle, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
 import type { Client, InventoryItem } from '@/lib/types'
 import { cn } from "@/lib/utils"
@@ -52,15 +54,13 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
   const router = useRouter()
   const supabase = createClient()
 
-  // --- States ---
+  // PERBAIKAN 2: Mencegah Hydration Error di Next.js (Vercel)
+  const [isMounted, setIsMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [inventory, setInventory] = useState<InventoryItem[]>([])
   const [clientSearch, setClientSearch] = useState('')
-  
-  // NEW: Toggle Type (In = Supplier to Warehouse, Out = Warehouse to Unit)
   const [transactionType, setTransactionType] = useState<'in' | 'out'>('out')
-  
   const [clientId, setClientId] = useState('')
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [description, setDescription] = useState('')
@@ -70,6 +70,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
   ])
 
   useEffect(() => {
+    setIsMounted(true)
     if (open) fetchInventory()
   }, [open])
 
@@ -87,6 +88,9 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
     items.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0),
     [items]
   )
+
+  // Render null jika belum mounted untuk menghindari mismatch HTML server vs client
+  if (!isMounted) return null
 
   // --- Handlers ---
   const handleUpdateItem = (index: number, field: keyof InvoiceItemInput, value: any) => {
@@ -111,25 +115,24 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!clientId) return toast.error("Pilih supplier/unit terlebih dahulu")
     setIsLoading(true)
 
     try {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Unauthorized")
 
-      // 1. VALIDASI STOK (Hanya jika Keluar/Out)
       if (transactionType === 'out') {
         for (const item of items) {
           if (!item.isCustom && item.inventoryId) {
             const stockItem = inventory.find(i => i.id === item.inventoryId)
             if (stockItem && stockItem.quantity < item.quantity) {
-              throw new Error(`Stok tidak cukup: ${stockItem.name} (Sisa: ${stockItem.quantity})`)
+              throw new Error(`Stok tidak cukup: ${stockItem.name}`)
             }
           }
         }
       }
 
-      // 2. SIMPAN INVOICE UTAMA
       const { data: invoice, error: invErr } = await supabase
         .from('purchase_invoices')
         .insert({
@@ -145,7 +148,6 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
 
       if (invErr) throw invErr
 
-      // 3. SIMPAN DETAIL ITEM
       const { error: itemErr } = await supabase.from('purchase_invoice_items').insert(
         items.map(item => ({
           purchase_invoice_id: invoice.id,
@@ -157,7 +159,6 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       )
       if (itemErr) throw itemErr
 
-      // 4. UPDATE STOK DINAMIS (Tambah jika IN, Kurang jika OUT)
       for (const item of items) {
         if (!item.isCustom && item.inventoryId) {
           const stockItem = inventory.find(i => i.id === item.inventoryId)
@@ -171,18 +172,17 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
         }
       }
 
-      // 5. CATAT KE PENGELUARAN (EXPENSES)
       await supabase.from('expenses').insert({
         user_id: user.id,
         amount: totalAmount,
         date: invoiceDate,
         category: 'Belanja Stok',
-        description: `Otomatis: ${transactionType === 'in' ? 'Pembelian' : 'Pemakaian'} ${invoiceNumber} (${clients.find(c => c.id === clientId)?.name})`,
+        description: `Otomatis: ${transactionType === 'in' ? 'Pembelian' : 'Pemakaian'} ${invoiceNumber}`,
         client_id: clientId,
         purchase_invoice_id: invoice.id 
       })
 
-      toast.success(transactionType === 'in' ? "Stok berhasil bertambah" : "Stok berhasil dipotong")
+      toast.success("Transaksi berhasil dicatat")
       setOpen(false)
       onSuccess()
       router.refresh()
@@ -204,51 +204,55 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto border-none shadow-2xl">
         <form onSubmit={handleSubmit} className="space-y-6">
           <DialogHeader>
-            <DialogTitle className="text-xl">Invoice Belanja & Stok</DialogTitle>
+            <DialogTitle className="text-xl font-bold">Invoice Belanja & Stok</DialogTitle>
             <DialogDescription>
-              Pilih tipe transaksi untuk menambah (Suplier) atau mengurangi (Pemakaian) stok.
+              Tentukan tipe transaksi (Masuk/Keluar) untuk mengelola stok gudang.
             </DialogDescription>
           </DialogHeader>
 
-          {/* TOGGLE TIPE TRANSAKSI */}
-          <div className="flex p-1 bg-slate-100 rounded-xl gap-1">
+          <div className="flex p-1 bg-slate-100 rounded-xl gap-1 border">
              <Button 
                 type="button" 
                 variant={transactionType === 'out' ? 'default' : 'ghost'}
-                className={cn("flex-1 rounded-lg transition-all", transactionType === 'out' && "shadow-sm")}
+                className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'out' ? "bg-white shadow-sm text-slate-900 hover:bg-white" : "text-slate-500")}
                 onClick={() => setTransactionType('out')}
              >
-                <ArrowUpRight className="h-4 w-4 mr-2 text-orange-500" />
+                <ArrowUpRight className="h-3 w-3 mr-2 text-orange-500" />
                 Pemakaian (Keluar)
              </Button>
              <Button 
                 type="button" 
                 variant={transactionType === 'in' ? 'default' : 'ghost'}
-                className={cn("flex-1 rounded-lg transition-all", transactionType === 'in' && "shadow-sm")}
+                className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'in' ? "bg-white shadow-sm text-slate-900 hover:bg-white" : "text-slate-500")}
                 onClick={() => setTransactionType('in')}
              >
-                <ArrowDownLeft className="h-4 w-4 mr-2 text-emerald-500" />
+                <ArrowDownLeft className="h-3 w-3 mr-2 text-emerald-500" />
                 Pembelian (Masuk)
              </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>{transactionType === 'in' ? 'Suplier' : 'Unit Pemakai'}</Label>
+            <div className="space-y-2 text-left">
+              <Label className="text-xs font-semibold">{transactionType === 'in' ? 'Suplier' : 'Unit Pemakai'}</Label>
               <Select value={clientId} onValueChange={setClientId} required>
-                <SelectTrigger><SelectValue placeholder="Pilih entitas" /></SelectTrigger>
+                <SelectTrigger className="bg-white"><SelectValue placeholder="Pilih..." /></SelectTrigger>
                 <SelectContent>
-                  <Input placeholder="Cari..." className="m-2 h-8 w-[calc(100%-1rem)]" onChange={(e) => setClientSearch(e.target.value)} />
+                  <Input 
+                    placeholder="Cari..." 
+                    className="m-2 h-8 w-[calc(100%-1rem)]" 
+                    onChange={(e) => setClientSearch(e.target.value)} 
+                  />
                   {filteredClients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label>Nomor Invoice / Referensi</Label>
+            <div className="space-y-2 text-left">
+              <Label className="text-xs font-semibold">No. Invoice</Label>
               <Input 
+                className="bg-white"
                 value={invoiceNumber} 
                 onChange={(e) => setInvoiceNumber(e.target.value)} 
-                placeholder={transactionType === 'in' ? "INV-SUP-001" : "OUT-001"} 
+                placeholder="Contoh: INV-123" 
                 required 
               />
             </div>
@@ -257,17 +261,16 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
           <div className="space-y-4">
             <div className="flex items-center justify-between border-b pb-2">
               <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                Daftar Barang {transactionType === 'in' ? 'Masuk' : 'Keluar'}
+                Detail Item
               </h3>
               <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setItems([...items, { description: '', quantity: 1, unitPrice: 0, isCustom: false }])}>
-                <Plus className="h-3 w-3 mr-1" /> Tambah Baris
+                <Plus className="h-3 w-3 mr-1" /> Baris Baru
               </Button>
             </div>
 
             {items.map((item, index) => (
-              <div key={index} className="p-4 rounded-xl border bg-slate-50/50 space-y-3 relative group">
+              <div key={index} className="p-4 rounded-xl border bg-slate-50/50 space-y-3">
                 <div className="flex items-center justify-between">
-                  <div className="flex gap-2">
                     <Button 
                         type="button" 
                         variant="secondary" 
@@ -280,49 +283,47 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                             setItems(newItems);
                         }}
                     >
-                        {item.isCustom ? "Custom" : "Gudang"}
+                        {item.isCustom ? "Kustom" : "Gudang"}
                     </Button>
-                  </div>
-                  {items.length > 1 && <Trash2 className="h-4 w-4 text-destructive cursor-pointer hover:scale-110 transition-transform" onClick={() => setItems(items.filter((_, i) => i !== index))} />}
+                  {items.length > 1 && <Trash2 className="h-4 w-4 text-destructive cursor-pointer" onClick={() => setItems(items.filter((_, i) => i !== index))} />}
                 </div>
 
                 {!item.isCustom ? (
                   <Select value={item.inventoryId} onValueChange={(val) => handleUpdateItem(index, 'inventoryId', val)}>
-                    <SelectTrigger className="bg-white"><SelectValue placeholder="Pilih barang dari gudang..." /></SelectTrigger>
+                    <SelectTrigger className="bg-white text-xs"><SelectValue placeholder="Pilih barang..." /></SelectTrigger>
                     <SelectContent>
                       {inventory.map(inv => (
                         <SelectItem key={inv.id} value={inv.id}>
-                          {inv.name} (Stok: {inv.quantity} {inv.unit})
+                          {inv.name} (Stok: {inv.quantity})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Input className="bg-white" placeholder="Nama barang kustom..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
+                  <Input className="bg-white text-xs" placeholder="Nama barang kustom..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
                 )}
 
                 <div className="grid grid-cols-3 gap-3">
                   <div className="space-y-1">
                     <Label className="text-[10px]">Qty</Label>
-                    <Input type="number" className="bg-white" value={item.quantity} onChange={(e) => handleUpdateItem(index, 'quantity', parseFloat(e.target.value) || 0)} />
+                    <Input type="number" className="bg-white text-xs" value={item.quantity} onChange={(e) => handleUpdateItem(index, 'quantity', parseFloat(e.target.value) || 0)} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[10px]">Harga Satuan</Label>
-                    <Input type="number" className="bg-white" value={item.unitPrice} onChange={(e) => handleUpdateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)} />
+                    <Label className="text-[10px]">Harga</Label>
+                    <Input type="number" className="bg-white text-xs" value={item.unitPrice} onChange={(e) => handleUpdateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)} />
                   </div>
-                  <div className="space-y-1">
-                    <Label className="text-[10px]">Subtotal</Label>
-                    <div className="h-10 flex items-center px-3 bg-slate-100 border rounded-md text-xs font-mono font-bold">
+                  <div className="space-y-1 text-right">
+                    <Label className="text-[10px]">Total</Label>
+                    <div className="h-10 flex items-center justify-end px-3 bg-white border rounded-md text-xs font-mono font-bold">
                         {formatCurrency(item.quantity * item.unitPrice)}
                     </div>
                   </div>
                 </div>
                 
                 {!item.isCustom && item.inventoryId && (
-                    <div className="flex items-center gap-1 mt-1">
-                        <Badge variant="outline" className="text-[9px] py-0 font-normal border-slate-300">
-                             <AlertCircle className="h-2 w-2 mr-1 text-slate-500" />
-                             Estimasi Stok Akhir: {(inventory.find(i => i.id === item.inventoryId)?.quantity || 0) + (transactionType === 'in' ? item.quantity : -item.quantity)}
+                    <div className="flex items-center gap-1">
+                        <Badge variant="outline" className="text-[9px] py-0 font-normal">
+                             Stok Akhir: {(inventory.find(i => i.id === item.inventoryId)?.quantity || 0) + (transactionType === 'in' ? item.quantity : -item.quantity)}
                         </Badge>
                     </div>
                 )}
@@ -331,19 +332,19 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
           </div>
 
           <div className={cn(
-            "p-4 rounded-xl flex justify-between items-center shadow-sm text-white",
+            "p-5 rounded-xl flex justify-between items-center text-white",
             transactionType === 'in' ? "bg-emerald-600" : "bg-slate-900"
           )}>
-            <div className="flex flex-col">
-                <span className="text-[10px] uppercase font-bold opacity-70">Total Nilai {transactionType === 'in' ? 'Masuk' : 'Keluar'}</span>
-                <span className="text-xl font-black tracking-tight">{formatCurrency(totalAmount)}</span>
+            <div>
+                <p className="text-[10px] uppercase font-bold opacity-70">Total Transaksi</p>
+                <p className="text-2xl font-black">{formatCurrency(totalAmount)}</p>
             </div>
-            {transactionType === 'in' ? <ArrowDownLeft className="h-8 w-8 opacity-20" /> : <ArrowUpRight className="h-8 w-8 opacity-20" />}
+            {transactionType === 'in' ? <ArrowDownLeft className="h-8 w-8 opacity-30" /> : <ArrowUpRight className="h-8 w-8 opacity-30" />}
           </div>
 
           <DialogFooter>
-            <Button type="submit" className="w-full py-7 text-lg font-bold" disabled={isLoading}>
-              {isLoading ? <Loader2 className="animate-spin mr-2" /> : (transactionType === 'in' ? "Tambah Stok ke Gudang" : "Simpan & Potong Stok")}
+            <Button type="submit" className="w-full py-6 text-base font-bold" disabled={isLoading}>
+              {isLoading ? <Loader2 className="animate-spin mr-2" /> : "Simpan Transaksi"}
             </Button>
           </DialogFooter>
         </form>
