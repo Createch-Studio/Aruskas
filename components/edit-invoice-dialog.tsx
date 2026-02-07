@@ -83,7 +83,8 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
           inventoryId: item.inventory_id || undefined,
           description: item.description,
           quantity: item.quantity,
-          unit_price: item.unit_price, // Pastikan field sesuai dengan database
+          // PERBAIKAN: Memetakan unit_price dari DB ke unitPrice di state
+          unitPrice: item.unit_price || 0, 
           isCustom: !item.inventory_id
         })) || []
       )
@@ -123,7 +124,6 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
     setIsLoading(true)
 
     try {
-      // 1. REVERT STOK LAMA (Gunakan data dari properti invoice yang sedang diedit)
       if (invoice.items && invoice.status !== 'cancelled') {
         for (const oldItem of invoice.items) {
           if (oldItem.inventory_id) {
@@ -138,7 +138,6 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
         }
       }
 
-      // 2. UPDATE INVOICE
       const { error: invErr } = await supabase
         .from('purchase_invoices')
         .update({
@@ -152,7 +151,6 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
         .eq('id', invoice.id)
       if (invErr) throw invErr
 
-      // 3. RE-SYNC ITEMS
       await supabase.from('purchase_invoice_items').delete().eq('purchase_invoice_id', invoice.id)
       const { error: itemErr } = await supabase.from('purchase_invoice_items').insert(
         items.map(item => ({
@@ -165,7 +163,6 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
       )
       if (itemErr) throw itemErr
 
-      // 4. TERAPKAN STOK BARU (Hanya jika tidak dibatalkan)
       if (status !== 'cancelled') {
         for (const item of items) {
           if (!item.isCustom && item.inventoryId) {
@@ -180,7 +177,6 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
         }
       }
 
-      // 5. UPDATE EXPENSES (Gunakan nominal 0 jika dicancel)
       await supabase.from('expenses').update({
         date: invoiceDate,
         amount: status === 'cancelled' ? 0 : totalAmount,

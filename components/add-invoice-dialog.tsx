@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge' 
-import { Plus, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, AlertCircle } from 'lucide-react'
+import { Plus, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, Package, PenLine } from 'lucide-react'
 import type { Client, InventoryItem } from '@/lib/types'
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -63,6 +63,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [description, setDescription] = useState('')
   const [invoiceDate, setInvoiceDate] = useState(new Date().toISOString().split('T')[0])
+  
   const [items, setItems] = useState<InvoiceItemInput[]>([
     { description: '', quantity: 1, unitPrice: 0, isCustom: false }
   ])
@@ -92,16 +93,22 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
   const handleUpdateItem = (index: number, field: keyof InvoiceItemInput, value: any) => {
     setItems(prev => {
       const newItems = [...prev]
-      if (field === 'inventoryId' && !newItems[index].isCustom) {
+      if (field === 'inventoryId') {
         const product = inventory.find(p => p.id === value)
         if (product) {
           newItems[index] = {
             ...newItems[index],
             inventoryId: value,
             description: product.name,
-            unitPrice: product.unit_cost,
+            unitPrice: product.unit_cost || 0,
           }
         }
+      } else if (field === 'isCustom' && value === true) {
+        // Reset ID jika pindah ke kustom
+        newItems[index] = { ...newItems[index], isCustom: true, inventoryId: undefined, description: '' }
+      } else if (field === 'isCustom' && value === false) {
+        // Reset jika pindah ke gudang
+        newItems[index] = { ...newItems[index], isCustom: false, description: '' }
       } else {
         newItems[index] = { ...newItems[index], [field]: value }
       }
@@ -118,6 +125,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Unauthorized")
 
+      // Validasi Stok
       if (transactionType === 'out') {
         for (const item of items) {
           if (!item.isCustom && item.inventoryId) {
@@ -129,7 +137,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
         }
       }
 
-      // --- DISAMAKAN: MENGGUNAKAN STATUS PENDING ---
+      // 1. Insert Invoice Utama
       const { data: invoice, error: invErr } = await supabase
         .from('purchase_invoices')
         .insert({
@@ -145,6 +153,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
 
       if (invErr) throw invErr
 
+      // 2. Insert Items
       const { error: itemErr } = await supabase.from('purchase_invoice_items').insert(
         items.map(item => ({
           purchase_invoice_id: invoice.id,
@@ -156,7 +165,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       )
       if (itemErr) throw itemErr
 
-      // UPDATE STOK TETAP JALAN
+      // 3. Update Stok (Hanya yang bukan kustom)
       for (const item of items) {
         if (!item.isCustom && item.inventoryId) {
           const stockItem = inventory.find(i => i.id === item.inventoryId)
@@ -170,6 +179,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
         }
       }
 
+      // 4. Catat Expense
       await supabase.from('expenses').insert({
         user_id: user.id,
         amount: totalAmount,
@@ -204,7 +214,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
           <DialogHeader>
             <DialogTitle className="text-xl font-bold">Input Transaksi Gudang</DialogTitle>
             <DialogDescription>
-              Status otomatis <strong>Pending</strong> agar terbaca di Penjualan.
+              Bisa ambil dari <strong>Gudang</strong> atau masukkan <strong>Kustom</strong>.
             </DialogDescription>
           </DialogHeader>
 
@@ -215,8 +225,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                 className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'out' ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}
                 onClick={() => setTransactionType('out')}
              >
-                <ArrowUpRight className="h-3 w-3 mr-2 text-orange-500" />
-                Keluar
+                <ArrowUpRight className="h-3 w-3 mr-2 text-orange-500" /> Keluar
              </Button>
              <Button 
                 type="button" 
@@ -224,8 +233,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                 className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'in' ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}
                 onClick={() => setTransactionType('in')}
              >
-                <ArrowDownLeft className="h-3 w-3 mr-2 text-emerald-500" />
-                Masuk
+                <ArrowDownLeft className="h-3 w-3 mr-2 text-emerald-500" /> Masuk
              </Button>
           </div>
 
@@ -260,13 +268,32 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
             {items.map((item, index) => (
               <div key={index} className="p-4 rounded-xl border bg-slate-50/50 space-y-3">
                 <div className="flex items-center justify-between">
-                    <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200 border-none text-[10px]">ITEM {index + 1}</Badge>
+                    <div className="flex gap-2">
+                      <Button 
+                        type="button" 
+                        variant="ghost" 
+                        size="sm" 
+                        className={cn("h-7 px-2 text-[10px] rounded-md", !item.isCustom ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-500")}
+                        onClick={() => handleUpdateItem(index, 'isCustom', false)}
+                      >
+                        <Package className="h-3 w-3 mr-1" /> Gudang
+                      </Button>
+                      <Button 
+                        type="button" 
+                        variant="ghost" 
+                        size="sm" 
+                        className={cn("h-7 px-2 text-[10px] rounded-md", item.isCustom ? "bg-slate-900 text-white" : "bg-slate-200 text-slate-500")}
+                        onClick={() => handleUpdateItem(index, 'isCustom', true)}
+                      >
+                        <PenLine className="h-3 w-3 mr-1" /> Kustom
+                      </Button>
+                    </div>
                     {items.length > 1 && <Trash2 className="h-4 w-4 text-destructive cursor-pointer" onClick={() => setItems(items.filter((_, i) => i !== index))} />}
                 </div>
 
                 {!item.isCustom ? (
                   <Select value={item.inventoryId} onValueChange={(val) => handleUpdateItem(index, 'inventoryId', val)}>
-                    <SelectTrigger className="bg-white text-xs"><SelectValue placeholder="Pilih barang..." /></SelectTrigger>
+                    <SelectTrigger className="bg-white text-xs"><SelectValue placeholder="Pilih barang dari gudang..." /></SelectTrigger>
                     <SelectContent>
                       {inventory.map(inv => (
                         <SelectItem key={inv.id} value={inv.id}>
@@ -276,7 +303,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Input className="bg-white text-xs" placeholder="Nama barang..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
+                  <Input className="bg-white text-xs" placeholder="Ketik nama barang manual..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
                 )}
 
                 <div className="grid grid-cols-3 gap-3">
