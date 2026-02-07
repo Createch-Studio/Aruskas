@@ -22,9 +22,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-// PERBAIKAN 1: Impor Badge yang sebelumnya menyebabkan eror
 import { Badge } from '@/components/ui/badge' 
-import { Plus, Trash2, Package, Keyboard, Loader2, AlertCircle, ArrowUpRight, ArrowDownLeft } from 'lucide-react'
+import { Plus, Trash2, Loader2, ArrowUpRight, ArrowDownLeft, AlertCircle } from 'lucide-react'
 import type { Client, InventoryItem } from '@/lib/types'
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -54,7 +53,6 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
   const router = useRouter()
   const supabase = createClient()
 
-  // PERBAIKAN 2: Mencegah Hydration Error di Next.js (Vercel)
   const [isMounted, setIsMounted] = useState(false)
   const [open, setOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -89,10 +87,8 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
     [items]
   )
 
-  // Render null jika belum mounted untuk menghindari mismatch HTML server vs client
   if (!isMounted) return null
 
-  // --- Handlers ---
   const handleUpdateItem = (index: number, field: keyof InvoiceItemInput, value: any) => {
     setItems(prev => {
       const newItems = [...prev]
@@ -122,32 +118,35 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Unauthorized")
 
+      // 1. Validasi Stok jika pengeluaran
       if (transactionType === 'out') {
         for (const item of items) {
           if (!item.isCustom && item.inventoryId) {
             const stockItem = inventory.find(i => i.id === item.inventoryId)
             if (stockItem && stockItem.quantity < item.quantity) {
-              throw new Error(`Stok tidak cukup: ${stockItem.name}`)
+              throw new Error(`Stok tidak cukup untuk: ${stockItem.name}`)
             }
           }
         }
       }
 
+      // 2. Simpan Invoice dengan status 'pending'
       const { data: invoice, error: invErr } = await supabase
         .from('purchase_invoices')
         .insert({
           user_id: user.id,
           client_id: clientId,
           invoice_number: invoiceNumber,
-          description: description || (transactionType === 'in' ? 'Pembelian Stok Supplier' : 'Pemakaian Stok Internal'),
+          description: description || (transactionType === 'in' ? 'Pembelian Pending' : 'Pemakaian Pending'),
           total_amount: totalAmount,
           invoice_date: invoiceDate,
-          status: 'used'
+          status: 'pending' // DEFAULT STATUS BARU BUAT
         })
         .select().single()
 
       if (invErr) throw invErr
 
+      // 3. Simpan Detail Item
       const { error: itemErr } = await supabase.from('purchase_invoice_items').insert(
         items.map(item => ({
           purchase_invoice_id: invoice.id,
@@ -159,6 +158,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       )
       if (itemErr) throw itemErr
 
+      // 4. UPDATE STOK LANGSUNG (Meskipun status invoice pending)
       for (const item of items) {
         if (!item.isCustom && item.inventoryId) {
           const stockItem = inventory.find(i => i.id === item.inventoryId)
@@ -167,22 +167,28 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
               ? stockItem.quantity + item.quantity 
               : stockItem.quantity - item.quantity
             
-            await supabase.from('inventory').update({ quantity: newQty }).eq('id', item.inventoryId)
+            const { error: stockError } = await supabase
+              .from('inventory')
+              .update({ quantity: newQty })
+              .eq('id', item.inventoryId)
+            
+            if (stockError) throw stockError
           }
         }
       }
 
+      // 5. Catat ke pengeluaran
       await supabase.from('expenses').insert({
         user_id: user.id,
         amount: totalAmount,
         date: invoiceDate,
         category: 'Belanja Stok',
-        description: `Otomatis: ${transactionType === 'in' ? 'Pembelian' : 'Pemakaian'} ${invoiceNumber}`,
+        description: `Pending Stok: ${invoiceNumber}`,
         client_id: clientId,
         purchase_invoice_id: invoice.id 
       })
 
-      toast.success("Transaksi berhasil dicatat")
+      toast.success("Invoice dibuat (Pending) & Stok telah diperbarui")
       setOpen(false)
       onSuccess()
       router.refresh()
@@ -196,7 +202,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="default" className="bg-slate-900 hover:bg-slate-800">
+        <Button variant="default" className="bg-slate-900 hover:bg-slate-800 shadow-md">
             <Plus className="mr-2 h-4 w-4" /> Input Transaksi Gudang
         </Button>
       </DialogTrigger>
@@ -204,36 +210,37 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto border-none shadow-2xl">
         <form onSubmit={handleSubmit} className="space-y-6">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Invoice Belanja & Stok</DialogTitle>
-            <DialogDescription>
-              Tentukan tipe transaksi (Masuk/Keluar) untuk mengelola stok gudang.
+            <DialogTitle className="text-xl font-bold">Buat Invoice Baru</DialogTitle>
+            <DialogDescription className="flex items-center gap-2 text-amber-600 font-medium">
+              <AlertCircle className="h-4 w-4" /> Status otomatis Pending, namun Stok akan langsung berubah.
             </DialogDescription>
           </DialogHeader>
 
+          {/* Tipe Transaksi */}
           <div className="flex p-1 bg-slate-100 rounded-xl gap-1 border">
              <Button 
                 type="button" 
                 variant={transactionType === 'out' ? 'default' : 'ghost'}
-                className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'out' ? "bg-white shadow-sm text-slate-900 hover:bg-white" : "text-slate-500")}
+                className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'out' ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}
                 onClick={() => setTransactionType('out')}
              >
                 <ArrowUpRight className="h-3 w-3 mr-2 text-orange-500" />
-                Pemakaian (Keluar)
+                Keluar (Potong Stok)
              </Button>
              <Button 
                 type="button" 
                 variant={transactionType === 'in' ? 'default' : 'ghost'}
-                className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'in' ? "bg-white shadow-sm text-slate-900 hover:bg-white" : "text-slate-500")}
+                className={cn("flex-1 rounded-lg transition-all text-xs h-9", transactionType === 'in' ? "bg-white shadow-sm text-slate-900" : "text-slate-500")}
                 onClick={() => setTransactionType('in')}
              >
                 <ArrowDownLeft className="h-3 w-3 mr-2 text-emerald-500" />
-                Pembelian (Masuk)
+                Masuk (Tambah Stok)
              </Button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2 text-left">
-              <Label className="text-xs font-semibold">{transactionType === 'in' ? 'Suplier' : 'Unit Pemakai'}</Label>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold">Pihak Terkait</Label>
               <Select value={clientId} onValueChange={setClientId} required>
                 <SelectTrigger className="bg-white"><SelectValue placeholder="Pilih..." /></SelectTrigger>
                 <SelectContent>
@@ -246,51 +253,29 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2 text-left">
+            <div className="space-y-2">
               <Label className="text-xs font-semibold">No. Invoice</Label>
               <Input 
                 className="bg-white"
                 value={invoiceNumber} 
                 onChange={(e) => setInvoiceNumber(e.target.value)} 
-                placeholder="Contoh: INV-123" 
+                placeholder="INV-..." 
                 required 
               />
             </div>
           </div>
 
           <div className="space-y-4">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
-                Detail Item
-              </h3>
-              <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => setItems([...items, { description: '', quantity: 1, unitPrice: 0, isCustom: false }])}>
-                <Plus className="h-3 w-3 mr-1" /> Baris Baru
-              </Button>
-            </div>
-
             {items.map((item, index) => (
               <div key={index} className="p-4 rounded-xl border bg-slate-50/50 space-y-3">
                 <div className="flex items-center justify-between">
-                    <Button 
-                        type="button" 
-                        variant="secondary" 
-                        size="sm" 
-                        className={cn("h-6 text-[9px] font-bold uppercase", item.isCustom ? "bg-orange-100 text-orange-700" : "bg-blue-100 text-blue-700")}
-                        onClick={() => {
-                            const newItems = [...items];
-                            newItems[index].isCustom = !newItems[index].isCustom;
-                            newItems[index].inventoryId = undefined;
-                            setItems(newItems);
-                        }}
-                    >
-                        {item.isCustom ? "Kustom" : "Gudang"}
-                    </Button>
-                  {items.length > 1 && <Trash2 className="h-4 w-4 text-destructive cursor-pointer" onClick={() => setItems(items.filter((_, i) => i !== index))} />}
+                    <Badge className="bg-slate-200 text-slate-700 hover:bg-slate-200 border-none text-[10px]">ITEM {index + 1}</Badge>
+                    {items.length > 1 && <Trash2 className="h-4 w-4 text-destructive cursor-pointer" onClick={() => setItems(items.filter((_, i) => i !== index))} />}
                 </div>
 
                 {!item.isCustom ? (
                   <Select value={item.inventoryId} onValueChange={(val) => handleUpdateItem(index, 'inventoryId', val)}>
-                    <SelectTrigger className="bg-white text-xs"><SelectValue placeholder="Pilih barang..." /></SelectTrigger>
+                    <SelectTrigger className="bg-white text-xs"><SelectValue placeholder="Pilih barang gudang..." /></SelectTrigger>
                     <SelectContent>
                       {inventory.map(inv => (
                         <SelectItem key={inv.id} value={inv.id}>
@@ -300,7 +285,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Input className="bg-white text-xs" placeholder="Nama barang kustom..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
+                  <Input className="bg-white text-xs" placeholder="Nama barang..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
                 )}
 
                 <div className="grid grid-cols-3 gap-3">
@@ -309,42 +294,32 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                     <Input type="number" className="bg-white text-xs" value={item.quantity} onChange={(e) => handleUpdateItem(index, 'quantity', parseFloat(e.target.value) || 0)} />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-[10px]">Harga</Label>
+                    <Label className="text-[10px]">Harga Satuan</Label>
                     <Input type="number" className="bg-white text-xs" value={item.unitPrice} onChange={(e) => handleUpdateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)} />
                   </div>
                   <div className="space-y-1 text-right">
                     <Label className="text-[10px]">Total</Label>
-                    <div className="h-10 flex items-center justify-end px-3 bg-white border rounded-md text-xs font-mono font-bold">
-                        {formatCurrency(item.quantity * item.unitPrice)}
-                    </div>
+                    <p className="text-xs font-bold py-2">{formatCurrency(item.quantity * item.unitPrice)}</p>
                   </div>
                 </div>
-                
-                {!item.isCustom && item.inventoryId && (
-                    <div className="flex items-center gap-1">
-                        <Badge variant="outline" className="text-[9px] py-0 font-normal">
-                             Stok Akhir: {(inventory.find(i => i.id === item.inventoryId)?.quantity || 0) + (transactionType === 'in' ? item.quantity : -item.quantity)}
-                        </Badge>
-                    </div>
-                )}
               </div>
             ))}
+            <Button type="button" variant="outline" className="w-full border-dashed" onClick={() => setItems([...items, { description: '', quantity: 1, unitPrice: 0, isCustom: false }])}>
+                + Tambah Item
+            </Button>
           </div>
 
-          <div className={cn(
-            "p-5 rounded-xl flex justify-between items-center text-white",
-            transactionType === 'in' ? "bg-emerald-600" : "bg-slate-900"
-          )}>
+          <div className="p-5 rounded-xl bg-slate-900 text-white flex justify-between items-center shadow-inner">
             <div>
-                <p className="text-[10px] uppercase font-bold opacity-70">Total Transaksi</p>
+                <p className="text-[10px] uppercase font-bold opacity-60 tracking-wider">Total Transaksi</p>
                 <p className="text-2xl font-black">{formatCurrency(totalAmount)}</p>
             </div>
-            {transactionType === 'in' ? <ArrowDownLeft className="h-8 w-8 opacity-30" /> : <ArrowUpRight className="h-8 w-8 opacity-30" />}
+            <Badge variant="secondary" className="bg-amber-400 text-amber-950 font-bold border-none">STATUS: PENDING</Badge>
           </div>
 
           <DialogFooter>
-            <Button type="submit" className="w-full py-6 text-base font-bold" disabled={isLoading}>
-              {isLoading ? <Loader2 className="animate-spin mr-2" /> : "Simpan Transaksi"}
+            <Button type="submit" className="w-full py-6 text-lg font-bold" disabled={isLoading}>
+              {isLoading ? <Loader2 className="animate-spin mr-2" /> : "Simpan & Update Stok"}
             </Button>
           </DialogFooter>
         </form>
