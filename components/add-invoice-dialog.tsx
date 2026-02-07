@@ -118,7 +118,6 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) throw new Error("Unauthorized")
 
-      // 1. Validasi Stok jika pengeluaran
       if (transactionType === 'out') {
         for (const item of items) {
           if (!item.isCustom && item.inventoryId) {
@@ -130,23 +129,22 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
         }
       }
 
-      // 2. Simpan Invoice dengan status 'pending'
+      // --- DISAMAKAN: MENGGUNAKAN STATUS PENDING ---
       const { data: invoice, error: invErr } = await supabase
         .from('purchase_invoices')
         .insert({
           user_id: user.id,
           client_id: clientId,
           invoice_number: invoiceNumber,
-          description: description || (transactionType === 'in' ? 'Pembelian Pending' : 'Pemakaian Pending'),
+          description: description || (transactionType === 'in' ? 'Pembelian' : 'Pemakaian'),
           total_amount: totalAmount,
           invoice_date: invoiceDate,
-          status: 'pending' // DEFAULT STATUS BARU BUAT
+          status: 'pending' 
         })
         .select().single()
 
       if (invErr) throw invErr
 
-      // 3. Simpan Detail Item
       const { error: itemErr } = await supabase.from('purchase_invoice_items').insert(
         items.map(item => ({
           purchase_invoice_id: invoice.id,
@@ -158,7 +156,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       )
       if (itemErr) throw itemErr
 
-      // 4. UPDATE STOK LANGSUNG (Meskipun status invoice pending)
+      // UPDATE STOK TETAP JALAN
       for (const item of items) {
         if (!item.isCustom && item.inventoryId) {
           const stockItem = inventory.find(i => i.id === item.inventoryId)
@@ -167,28 +165,22 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
               ? stockItem.quantity + item.quantity 
               : stockItem.quantity - item.quantity
             
-            const { error: stockError } = await supabase
-              .from('inventory')
-              .update({ quantity: newQty })
-              .eq('id', item.inventoryId)
-            
-            if (stockError) throw stockError
+            await supabase.from('inventory').update({ quantity: newQty }).eq('id', item.inventoryId)
           }
         }
       }
 
-      // 5. Catat ke pengeluaran
       await supabase.from('expenses').insert({
         user_id: user.id,
         amount: totalAmount,
         date: invoiceDate,
         category: 'Belanja Stok',
-        description: `Pending Stok: ${invoiceNumber}`,
+        description: `Otomatis: ${transactionType === 'in' ? 'Pembelian' : 'Pemakaian'} ${invoiceNumber}`,
         client_id: clientId,
         purchase_invoice_id: invoice.id 
       })
 
-      toast.success("Invoice dibuat (Pending) & Stok telah diperbarui")
+      toast.success("Transaksi berhasil dicatat")
       setOpen(false)
       onSuccess()
       router.refresh()
@@ -210,13 +202,12 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto border-none shadow-2xl">
         <form onSubmit={handleSubmit} className="space-y-6">
           <DialogHeader>
-            <DialogTitle className="text-xl font-bold">Buat Invoice Baru</DialogTitle>
-            <DialogDescription className="flex items-center gap-2 text-amber-600 font-medium">
-              <AlertCircle className="h-4 w-4" /> Status otomatis Pending, namun Stok akan langsung berubah.
+            <DialogTitle className="text-xl font-bold">Input Transaksi Gudang</DialogTitle>
+            <DialogDescription>
+              Status otomatis <strong>Pending</strong> agar terbaca di Penjualan.
             </DialogDescription>
           </DialogHeader>
 
-          {/* Tipe Transaksi */}
           <div className="flex p-1 bg-slate-100 rounded-xl gap-1 border">
              <Button 
                 type="button" 
@@ -225,7 +216,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                 onClick={() => setTransactionType('out')}
              >
                 <ArrowUpRight className="h-3 w-3 mr-2 text-orange-500" />
-                Keluar (Potong Stok)
+                Keluar
              </Button>
              <Button 
                 type="button" 
@@ -234,7 +225,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
                 onClick={() => setTransactionType('in')}
              >
                 <ArrowDownLeft className="h-3 w-3 mr-2 text-emerald-500" />
-                Masuk (Tambah Stok)
+                Masuk
              </Button>
           </div>
 
@@ -275,7 +266,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
 
                 {!item.isCustom ? (
                   <Select value={item.inventoryId} onValueChange={(val) => handleUpdateItem(index, 'inventoryId', val)}>
-                    <SelectTrigger className="bg-white text-xs"><SelectValue placeholder="Pilih barang gudang..." /></SelectTrigger>
+                    <SelectTrigger className="bg-white text-xs"><SelectValue placeholder="Pilih barang..." /></SelectTrigger>
                     <SelectContent>
                       {inventory.map(inv => (
                         <SelectItem key={inv.id} value={inv.id}>
@@ -319,7 +310,7 @@ export function AddInvoiceDialog({ clients, onSuccess }: AddInvoiceDialogProps) 
 
           <DialogFooter>
             <Button type="submit" className="w-full py-6 text-lg font-bold" disabled={isLoading}>
-              {isLoading ? <Loader2 className="animate-spin mr-2" /> : "Simpan & Update Stok"}
+              {isLoading ? <Loader2 className="animate-spin mr-2" /> : "Simpan Transaksi"}
             </Button>
           </DialogFooter>
         </form>

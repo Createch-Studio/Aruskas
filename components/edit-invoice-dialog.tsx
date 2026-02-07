@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge' // Tambahkan impor Badge
+import { Badge } from '@/components/ui/badge' 
 import { Plus, Trash2, Loader2, AlertTriangle } from 'lucide-react'
 import type { Client, PurchaseInvoice, InventoryItem } from '@/lib/types'
 import { cn } from "@/lib/utils"
@@ -83,7 +83,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
           inventoryId: item.inventory_id || undefined,
           description: item.description,
           quantity: item.quantity,
-          unitPrice: item.unit_price,
+          unit_price: item.unit_price, // Pastikan field sesuai dengan database
           isCustom: !item.inventory_id
         })) || []
       )
@@ -123,7 +123,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
     setIsLoading(true)
 
     try {
-      // 1. REVERT STOK LAMA (Kembalikan ke kondisi nol sebelum update)
+      // 1. REVERT STOK LAMA (Gunakan data dari properti invoice yang sedang diedit)
       if (invoice.items && invoice.status !== 'cancelled') {
         for (const oldItem of invoice.items) {
           if (oldItem.inventory_id) {
@@ -138,7 +138,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
         }
       }
 
-      // 2. UPDATE DATA UTAMA
+      // 2. UPDATE INVOICE
       const { error: invErr } = await supabase
         .from('purchase_invoices')
         .update({
@@ -152,7 +152,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
         .eq('id', invoice.id)
       if (invErr) throw invErr
 
-      // 3. RE-SYNC ITEMS (Hapus dan Insert ulang adalah cara paling aman untuk nested items)
+      // 3. RE-SYNC ITEMS
       await supabase.from('purchase_invoice_items').delete().eq('purchase_invoice_id', invoice.id)
       const { error: itemErr } = await supabase.from('purchase_invoice_items').insert(
         items.map(item => ({
@@ -165,7 +165,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
       )
       if (itemErr) throw itemErr
 
-      // 4. TERAPKAN STOK BARU (Hanya jika status 'used' atau 'pending')
+      // 4. TERAPKAN STOK BARU (Hanya jika tidak dibatalkan)
       if (status !== 'cancelled') {
         for (const item of items) {
           if (!item.isCustom && item.inventoryId) {
@@ -180,7 +180,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
         }
       }
 
-      // 5. UPDATE EXPENSES
+      // 5. UPDATE EXPENSES (Gunakan nominal 0 jika dicancel)
       await supabase.from('expenses').update({
         date: invoiceDate,
         amount: status === 'cancelled' ? 0 : totalAmount,
@@ -209,11 +209,11 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
           )}>
             <div className="flex justify-between items-start">
               <div>
-                <Badge className="bg-white/20 hover:bg-white/30 border-none text-white mb-2 uppercase text-[10px]">
+                <Badge className="bg-white/20 border-none text-white mb-2 uppercase text-[10px]">
                    {isOldTypeIn ? 'Barang Masuk' : 'Barang Keluar'}
                 </Badge>
                 <DialogTitle className="text-2xl font-bold">Edit Transaksi</DialogTitle>
-                <DialogDescription className="text-white/70">ID: {invoice?.invoice_number}</DialogDescription>
+                <DialogDescription className="text-white/70">No. Ref: {invoice?.invoice_number}</DialogDescription>
               </div>
             </div>
           </div>
@@ -223,7 +223,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
               <div className="space-y-2">
                 <Label className="text-xs font-bold uppercase">Pihak Terkait</Label>
                 <Select value={clientId} onValueChange={setClientId}>
-                  <SelectTrigger className="bg-slate-50 border-slate-200"><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="bg-slate-50"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
                   </SelectContent>
@@ -231,25 +231,30 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
               </div>
               <div className="space-y-2">
                 <Label className="text-xs font-bold uppercase">No. Referensi</Label>
-                <Input className="bg-slate-50 border-slate-200" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+                <Input className="bg-slate-50" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
               </div>
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label className="text-xs font-bold uppercase">Tanggal</Label>
-                <Input className="bg-slate-50 border-slate-200" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
+                <Input className="bg-slate-50" type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} />
               </div>
               <div className="space-y-2">
-                <Label className="text-xs font-bold uppercase">Status</Label>
+                <Label className="text-xs font-bold uppercase">Status Transaksi</Label>
                 <Select value={status} onValueChange={(v: any) => setStatus(v)}>
-                  <SelectTrigger className={cn("bg-slate-50 border-slate-200", status === 'cancelled' && "border-destructive text-destructive")}>
+                  <SelectTrigger className={cn(
+                    "bg-slate-50",
+                    status === 'pending' && "text-amber-600",
+                    status === 'used' && "text-emerald-600",
+                    status === 'cancelled' && "text-red-600"
+                  )}>
                       <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="pending text-amber-600">Pending</SelectItem>
-                    <SelectItem value="used" className="text-emerald-600">Selesai</SelectItem>
-                    <SelectItem value="cancelled" className="text-destructive font-bold">Dibatalkan (Revert Stok)</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="used">Selesai (Used)</SelectItem>
+                    <SelectItem value="cancelled">Dibatalkan</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -259,7 +264,7 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
               <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
                   <AlertTriangle className="h-4 w-4 text-red-600 shrink-0 mt-0.5" />
                   <p className="text-[11px] text-red-700 font-medium">
-                      Status "Dibatalkan" akan mengosongkan nilai pengeluaran dan mengembalikan jumlah stok gudang ke posisi semula.
+                      Status Dibatalkan akan mengembalikan stok gudang ke posisi semula.
                   </p>
               </div>
             )}
@@ -267,28 +272,25 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
             <div className="space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-2">
                   <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Daftar Barang</h3>
-                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-blue-600 hover:text-blue-700" onClick={() => setItems([...items, { description: '', quantity: 1, unitPrice: 0, isCustom: false }])}>
-                      <Plus className="h-3 w-3 mr-1" /> Tambah Baris
+                  <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-blue-600" onClick={() => setItems([...items, { description: '', quantity: 1, unitPrice: 0, isCustom: false }])}>
+                      + Tambah Baris
                   </Button>
               </div>
               
               {items.map((item, index) => (
-                <div key={index} className="p-4 rounded-xl border border-slate-100 bg-slate-50/30 space-y-3 relative group">
+                <div key={index} className="p-4 rounded-xl border border-slate-100 bg-slate-50/30 space-y-3 relative">
                   <div className="flex justify-between items-center">
-                    <Badge variant="outline" className={cn(
-                      "cursor-pointer text-[9px] uppercase",
-                      item.isCustom ? "border-orange-200 text-orange-600" : "border-blue-200 text-blue-600"
-                    )} onClick={() => {
+                    <Badge variant="outline" className="text-[9px] uppercase cursor-pointer" onClick={() => {
                       const newItems = [...items]
                       newItems[index].isCustom = !newItems[index].isCustom
                       newItems[index].inventoryId = undefined
                       setItems(newItems)
                     }}>
-                      {item.isCustom ? "Kustom" : "Dari Gudang"}
+                      {item.isCustom ? "Kustom" : "Gudang"}
                     </Badge>
                     {items.length > 1 && (
                       <button type="button" onClick={() => setItems(items.filter((_, i) => i !== index))}>
-                        <Trash2 className="h-4 w-4 text-slate-300 hover:text-destructive transition-colors" />
+                        <Trash2 className="h-4 w-4 text-slate-300 hover:text-red-500" />
                       </button>
                     )}
                   </div>
@@ -301,21 +303,21 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
                       </SelectContent>
                     </Select>
                   ) : (
-                    <Input className="bg-white h-9 text-xs" placeholder="Ketik nama barang..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
+                    <Input className="bg-white h-9 text-xs" placeholder="Nama barang..." value={item.description} onChange={(e) => handleUpdateItem(index, 'description', e.target.value)} />
                   )}
 
                   <div className="grid grid-cols-3 gap-3">
-                    <div className="space-y-1">
+                    <div>
                       <Label className="text-[9px] uppercase text-slate-400 font-bold">Qty</Label>
                       <Input className="bg-white h-9 text-xs" type="number" value={item.quantity} onChange={(e) => handleUpdateItem(index, 'quantity', parseFloat(e.target.value) || 0)} />
                     </div>
-                    <div className="space-y-1">
+                    <div>
                       <Label className="text-[9px] uppercase text-slate-400 font-bold">Harga</Label>
                       <Input className="bg-white h-9 text-xs" type="number" value={item.unitPrice} onChange={(e) => handleUpdateItem(index, 'unitPrice', parseFloat(e.target.value) || 0)} />
                     </div>
-                    <div className="space-y-1 text-right">
+                    <div className="text-right">
                       <Label className="text-[9px] uppercase text-slate-400 font-bold">Subtotal</Label>
-                      <div className="h-9 flex items-center justify-end px-3 bg-slate-100 rounded border border-slate-200 font-mono text-[11px] font-bold">
+                      <div className="h-9 flex items-center justify-end px-3 bg-slate-100 rounded text-[11px] font-bold">
                         {formatCurrency(item.quantity * item.unitPrice)}
                       </div>
                     </div>
@@ -325,13 +327,13 @@ export function EditInvoiceDialog({ invoice, clients, open, onOpenChange, onSucc
             </div>
 
             <div className="p-4 rounded-xl bg-slate-100 flex justify-between items-center">
-              <span className="text-xs font-bold text-slate-500 uppercase">Total Nilai Akhir</span>
-              <span className="text-xl font-black text-slate-900">{formatCurrency(totalAmount)}</span>
+              <span className="text-xs font-bold text-slate-500">TOTAL AKHIR</span>
+              <span className="text-xl font-black">{formatCurrency(totalAmount)}</span>
             </div>
 
             <DialogFooter>
-              <Button type="submit" className="w-full py-6 text-base font-bold" disabled={isLoading}>
-                {isLoading ? <Loader2 className="animate-spin mr-2" /> : "Perbarui & Sinkronkan Stok"}
+              <Button type="submit" className="w-full py-6 font-bold" disabled={isLoading}>
+                {isLoading ? <Loader2 className="animate-spin mr-2" /> : "Simpan Perubahan"}
               </Button>
             </DialogFooter>
           </div>
