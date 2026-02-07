@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import {
@@ -30,7 +29,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
-import { Eye, Pencil, Trash2, Loader2, AlertTriangle } from 'lucide-react'
+import { Eye, Pencil, Trash2, Loader2, AlertTriangle, ReceiptText } from 'lucide-react'
 import { EditInvoiceDialog } from '@/components/edit-invoice-dialog'
 import type { PurchaseInvoice, Client } from '@/lib/types'
 import { toast } from "sonner"
@@ -59,10 +58,10 @@ const formatDate = (dateString: string) => {
 
 function getStatusBadge(status: string) {
   switch (status) {
-    case 'pending': return <Badge variant="secondary">Pending</Badge>
-    case 'used': return <Badge variant="default">Digunakan</Badge>
-    case 'cancelled': return <Badge variant="destructive">Dibatalkan</Badge>
-    default: return <Badge>{status}</Badge>
+    case 'pending': return <Badge variant="secondary" className="capitalize">Pending</Badge>
+    case 'used': return <Badge variant="default" className="bg-emerald-500 hover:bg-emerald-600 capitalize">Digunakan</Badge>
+    case 'cancelled': return <Badge variant="destructive" className="capitalize">Dibatalkan</Badge>
+    default: return <Badge className="capitalize">{status}</Badge>
   }
 }
 
@@ -77,11 +76,11 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
     
     try {
       // 1. REVERT STOK (Kembalikan barang ke Gudang)
-      // Hanya lakukan jika statusnya bukan 'cancelled' (karena cancelled stok sudah kembali)
+      // Stok hanya dikembalikan jika statusnya bukan 'cancelled' 
+      // (karena status cancelled seharusnya stok sudah kembali)
       if (invoice.status !== 'cancelled' && invoice.items) {
         for (const item of invoice.items) {
           if (item.inventory_id) {
-            // Ambil stok saat ini
             const { data: inv } = await supabase
               .from('inventory')
               .select('quantity')
@@ -91,7 +90,7 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
             if (inv) {
               await supabase
                 .from('inventory')
-                .update({ quantity: inv.quantity + item.quantity }) // Tambah balik stoknya
+                .update({ quantity: inv.quantity + item.quantity })
                 .eq('id', item.inventory_id)
             }
           }
@@ -99,18 +98,15 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
       }
 
       // 2. HAPUS EXPENSES TERKAIT
+      // Mencari berdasarkan purchase_invoice_id atau pola deskripsi otomatis
       await supabase
         .from('expenses')
         .delete()
-        .ilike('description', `%Belanja ${invoice.invoice_number}%`)
+        .or(`purchase_invoice_id.eq.${invoice.id},description.ilike.%Belanja ${invoice.invoice_number}%`)
 
-      // 3. HAPUS DETAIL ITEM
-      await supabase
-        .from('purchase_invoice_items')
-        .delete()
-        .eq('purchase_invoice_id', invoice.id)
-
-      // 4. HAPUS INVOICE UTAMA
+      // 3. HAPUS DETAIL ITEM & INVOICE UTAMA (Cascading di DB biasanya menangani ini, tapi kita lakukan manual untuk keamanan)
+      await supabase.from('purchase_invoice_items').delete().eq('purchase_invoice_id', invoice.id)
+      
       const { error: invError } = await supabase
         .from('purchase_invoices')
         .delete()
@@ -118,7 +114,7 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
 
       if (invError) throw invError
 
-      toast.success(`Invoice ${invoice.invoice_number} dihapus & stok dikembalikan`)
+      toast.success(`Invoice ${invoice.invoice_number} berhasil dihapus & stok disinkronkan`)
       onRefresh()
     } catch (error: any) {
       toast.error("Gagal menghapus: " + error.message)
@@ -129,8 +125,9 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
 
   if (invoices.length === 0) {
     return (
-      <div className="text-center py-12 text-muted-foreground border rounded-xl border-dashed bg-slate-50/50">
-        Belum ada data invoice pemakaian.
+      <div className="flex flex-col items-center justify-center py-16 text-muted-foreground border-2 border-dashed rounded-xl bg-slate-50/50">
+        <ReceiptText className="h-10 w-10 mb-2 opacity-20" />
+        <p className="text-sm">Belum ada data invoice pemakaian.</p>
       </div>
     )
   }
@@ -138,121 +135,136 @@ export function InvoiceTable({ invoices, clients, onRefresh }: InvoiceTableProps
   return (
     <>
       <div className="rounded-xl border shadow-sm bg-white overflow-hidden">
-        <Table>
-          <TableHeader className="bg-slate-50">
-            <TableRow>
-              <TableHead className="text-xs uppercase font-bold">No. Invoice</TableHead>
-              <TableHead className="text-xs uppercase font-bold">Tanggal</TableHead>
-              <TableHead className="text-xs uppercase font-bold">Pemakai</TableHead>
-              <TableHead className="text-xs uppercase font-bold text-right">Total Nilai</TableHead>
-              <TableHead className="text-xs uppercase font-bold">Status</TableHead>
-              <TableHead className="w-[120px] text-center text-xs uppercase font-bold">Aksi</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {invoices.map((invoice) => (
-              <TableRow key={invoice.id} className="hover:bg-slate-50/50 transition-colors">
-                <TableCell className="font-mono text-sm font-semibold">{invoice.invoice_number}</TableCell>
-                <TableCell className="text-sm">{formatDate(invoice.invoice_date)}</TableCell>
-                <TableCell className="text-sm font-medium">{invoice.client?.name || '-'}</TableCell>
-                <TableCell className="text-right font-bold text-sm">{formatCurrency(invoice.total_amount)}</TableCell>
-                <TableCell>{getStatusBadge(invoice.status)}</TableCell>
-                <TableCell>
-                  <div className="flex justify-center gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setViewingInvoice(invoice)}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-blue-600" onClick={() => setEditingInvoice(invoice)}>
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    
-                    <AlertDialog>
-                      <AlertDialogTrigger asChild>
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-destructive hover:bg-destructive/10"
-                          disabled={deletingId === invoice.id}
-                        >
-                          {deletingId === invoice.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
-                        </Button>
-                      </AlertDialogTrigger>
-                      <AlertDialogContent>
-                        <AlertDialogHeader>
-                          <AlertDialogTitle className="flex items-center gap-2">
-                            <AlertTriangle className="h-5 w-5 text-destructive" /> Konfirmasi Hapus
-                          </AlertDialogTitle>
-                          <AlertDialogDescription>
-                            Menghapus invoice <strong>{invoice.invoice_number}</strong> akan otomatis mengembalikan semua item ke stok gudang. Tindakan ini tidak bisa dibatalkan.
-                          </AlertDialogDescription>
-                        </AlertDialogHeader>
-                        <AlertDialogFooter>
-                          <AlertDialogCancel>Batal</AlertDialogCancel>
-                          <AlertDialogAction 
-                            onClick={() => handleDelete(invoice)}
-                            className="bg-destructive hover:bg-destructive/90 text-white"
-                          >
-                            Hapus & Revert Stok
-                          </AlertDialogAction>
-                        </AlertDialogFooter>
-                      </AlertDialogContent>
-                    </AlertDialog>
-                  </div>
-                </TableCell>
+        <div className="overflow-x-auto">
+          <Table>
+            <TableHeader className="bg-slate-50">
+              <TableRow>
+                <TableHead className="text-[10px] uppercase font-bold tracking-wider">No. Invoice</TableHead>
+                <TableHead className="text-[10px] uppercase font-bold tracking-wider">Tanggal</TableHead>
+                <TableHead className="text-[10px] uppercase font-bold tracking-wider">Unit Pemakai</TableHead>
+                <TableHead className="text-[10px] uppercase font-bold tracking-wider text-right">Total Nilai</TableHead>
+                <TableHead className="text-[10px] uppercase font-bold tracking-wider text-center">Status</TableHead>
+                <TableHead className="w-[120px] text-center text-[10px] uppercase font-bold tracking-wider">Aksi</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {invoices.map((invoice) => (
+                <TableRow key={invoice.id} className="hover:bg-slate-50/50 transition-colors">
+                  <TableCell className="font-mono text-xs font-semibold">{invoice.invoice_number}</TableCell>
+                  <TableCell className="text-xs">{formatDate(invoice.invoice_date)}</TableCell>
+                  <TableCell className="text-xs font-medium">{invoice.client?.name || '-'}</TableCell>
+                  <TableCell className="text-right font-bold text-xs">{formatCurrency(invoice.total_amount)}</TableCell>
+                  <TableCell className="text-center">{getStatusBadge(invoice.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-center gap-1">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setViewingInvoice(invoice)}>
+                        <Eye className="h-4 w-4 text-slate-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-blue-600" onClick={() => setEditingInvoice(invoice)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button 
+                            variant="ghost" 
+                            size="icon" 
+                            className="h-7 w-7 text-destructive hover:bg-destructive/10"
+                            disabled={deletingId === invoice.id}
+                          >
+                            {deletingId === invoice.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle className="flex items-center gap-2">
+                              <AlertTriangle className="h-5 w-5 text-destructive" /> Hapus Data?
+                            </AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Menghapus <strong>{invoice.invoice_number}</strong> akan mengembalikan item ke stok gudang dan menghapus catatan pengeluaran.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Batal</AlertDialogCancel>
+                            <AlertDialogAction 
+                              onClick={() => handleDelete(invoice)}
+                              className="bg-destructive hover:bg-destructive/90 text-white"
+                            >
+                              Hapus & Revert Stok
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       </div>
 
-      {/* Detail Dialog */}
+      {/* --- View Detail Dialog --- */}
       <Dialog open={!!viewingInvoice} onOpenChange={(open) => !open && setViewingInvoice(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Rincian Pemakaian Barang</DialogTitle>
+        <DialogContent className="max-w-2xl overflow-hidden p-0">
+          <DialogHeader className="p-6 bg-slate-50 border-b">
+            <DialogTitle className="flex items-center gap-2">
+              <ReceiptText className="h-5 w-5 text-primary" /> Detail Pemakaian Barang
+            </DialogTitle>
           </DialogHeader>
+          
           {viewingInvoice && (
-            <div className="space-y-6 pt-4">
-              <div className="grid grid-cols-2 gap-8 text-sm border-b pb-6">
-                <div className="space-y-1">
-                  <p className="text-muted-foreground uppercase text-[10px] font-bold">Informasi Invoice</p>
-                  <p className="font-mono text-lg font-bold">{viewingInvoice.invoice_number}</p>
-                  <p>{formatDate(viewingInvoice.invoice_date)}</p>
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+              <div className="grid grid-cols-2 gap-4 text-xs">
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-muted-foreground font-bold uppercase tracking-tighter text-[9px]">Nomor Invoice</p>
+                    <p className="font-mono text-sm font-bold">{viewingInvoice.invoice_number}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-bold uppercase tracking-tighter text-[9px]">Unit Pemakai</p>
+                    <p className="text-sm font-semibold">{viewingInvoice.client?.name || '-'}</p>
+                  </div>
                 </div>
-                <div className="space-y-1 text-right">
-                  <p className="text-muted-foreground uppercase text-[10px] font-bold">Unit / Client</p>
-                  <p className="font-bold text-lg">{viewingInvoice.client?.name || '-'}</p>
-                  <div>{getStatusBadge(viewingInvoice.status)}</div>
+                <div className="space-y-3 text-right">
+                  <div>
+                    <p className="text-muted-foreground font-bold uppercase tracking-tighter text-[9px]">Tanggal Transaksi</p>
+                    <p className="text-sm font-semibold">{formatDate(viewingInvoice.invoice_date)}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground font-bold uppercase tracking-tighter text-[9px]">Status Alokasi</p>
+                    <div>{getStatusBadge(viewingInvoice.status)}</div>
+                  </div>
                 </div>
               </div>
 
               <div className="rounded-lg border overflow-hidden">
                 <Table>
                   <TableHeader className="bg-slate-50">
-                    <TableRow>
-                      <TableHead>Item</TableHead>
-                      <TableHead className="text-right">Qty</TableHead>
-                      <TableHead className="text-right">Subtotal</TableHead>
+                    <TableRow className="h-8">
+                      <TableHead className="text-[10px] font-bold">Deskripsi Barang</TableHead>
+                      <TableHead className="text-right text-[10px] font-bold">Qty</TableHead>
+                      <TableHead className="text-right text-[10px] font-bold">Total</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {viewingInvoice.items?.map((item) => (
-                      <TableRow key={item.id}>
-                        <TableCell className="text-sm">
-                            <p className="font-medium">{item.description}</p>
-                            {!item.inventory_id && <Badge variant="outline" className="text-[9px] h-4">Custom Item</Badge>}
+                      <TableRow key={item.id} className="h-10">
+                        <TableCell className="text-xs">
+                            <span className="font-medium">{item.description}</span>
+                            {!item.inventory_id && <Badge variant="outline" className="ml-2 text-[8px] h-3 px-1 border-orange-200 text-orange-600 bg-orange-50 uppercase font-bold">Custom</Badge>}
                         </TableCell>
-                        <TableCell className="text-right text-sm">{item.quantity}</TableCell>
-                        <TableCell className="text-right text-sm font-mono">{formatCurrency(item.quantity * item.unit_price)}</TableCell>
+                        <TableCell className="text-right text-xs">{item.quantity}</TableCell>
+                        <TableCell className="text-right text-xs font-mono font-medium">{formatCurrency(item.quantity * item.unit_price)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
 
-              <div className="p-4 bg-slate-900 text-white rounded-xl flex justify-between items-center shadow-inner">
-                <span className="text-sm font-medium">Total Nilai Keluar</span>
-                <span className="text-2xl font-black">{formatCurrency(viewingInvoice.total_amount)}</span>
+              <div className="p-4 bg-slate-900 text-white rounded-xl flex justify-between items-center">
+                <span className="text-xs font-medium text-slate-400">Total Nilai Keluar</span>
+                <span className="text-xl font-black tracking-tight">{formatCurrency(viewingInvoice.total_amount)}</span>
               </div>
             </div>
           )}
